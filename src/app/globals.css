@@ -1,0 +1,991 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-archivo);
+  --font-mono: var(--font-mono-stack);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-app-rail: var(--app-rail);
+  --color-app-sidebar: var(--app-sidebar);
+  --color-app-chat: var(--app-chat);
+  --color-app-raise: var(--app-raise);
+  --color-online: var(--online);
+  --color-idle: var(--idle);
+  --color-busy: var(--busy);
+  --color-dnd: var(--dnd);
+  --color-offline: var(--offline);
+  --color-hyper: var(--hyper);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  /* HyperChat identity: OLED black and white, with one rare blue accent
+     carried over from the original project (#547cff). The blue is used
+     sparingly: mentions, links, unread marks, presence, focus. */
+  --radius: 0.125rem;
+  --background: #000000;
+  --foreground: #f5f5f5;
+  --card: #0a0a0a;
+  --card-foreground: #f5f5f5;
+  --popover: #101011;
+  --popover-foreground: #f5f5f5;
+  --primary: #f5f5f5;
+  --primary-foreground: #000000;
+  --secondary: #141414;
+  --secondary-foreground: #f5f5f5;
+  --muted: #111111;
+  --muted-foreground: #9a9a9a;
+  --accent: #191919;
+  --accent-foreground: #f5f5f5;
+  --destructive: #e5484d;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #547cff;
+  --chart-1: #f5f5f5;
+  --chart-2: #547cff;
+  --chart-3: #9a9a9a;
+  --chart-4: #5a5a5a;
+  --chart-5: #232323;
+  --sidebar: #060606;
+  --sidebar-foreground: #f5f5f5;
+  --sidebar-primary: #f5f5f5;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #191919;
+  --sidebar-accent-foreground: #f5f5f5;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #547cff;
+  --app-rail: #000000;
+  --app-sidebar: #060606;
+  --app-chat: #020202;
+  --app-raise: #121212;
+  --online: #23a55a;
+  --idle: #f0b232;
+  --busy: #547cff;
+  --dnd: #f23f43;
+  --offline: #5a5a5a;
+  --hyper: #547cff;
+  --font-mono-stack: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* HyperChat runs dark only, like any chat client used at 2am */
+.dark {
+  --radius: 0.125rem;
+  --background: #000000;
+  --foreground: #f5f5f5;
+  --card: #0a0a0a;
+  --card-foreground: #f5f5f5;
+  --popover: #101011;
+  --popover-foreground: #f5f5f5;
+  --primary: #f5f5f5;
+  --primary-foreground: #000000;
+  --secondary: #141414;
+  --secondary-foreground: #f5f5f5;
+  --muted: #111111;
+  --muted-foreground: #9a9a9a;
+  --accent: #191919;
+  --accent-foreground: #f5f5f5;
+  --destructive: #e5484d;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #547cff;
+  --chart-1: #f5f5f5;
+  --chart-2: #547cff;
+  --chart-3: #9a9a9a;
+  --chart-4: #5a5a5a;
+  --chart-5: #232323;
+  --sidebar: #060606;
+  --sidebar-foreground: #f5f5f5;
+  --sidebar-primary: #f5f5f5;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #191919;
+  --sidebar-accent-foreground: #f5f5f5;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #547cff;
+  --app-rail: #000000;
+  --app-sidebar: #060606;
+  --app-chat: #020202;
+  --app-raise: #121212;
+  --online: #23a55a;
+  --idle: #f0b232;
+  --busy: #547cff;
+  --dnd: #f23f43;
+  --offline: #5a5a5a;
+  --hyper: #547cff;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  /* The mouse finally means something: everything you can press, drag or
+   * follow gets a hand; everything inert keeps the arrow. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"],
+  [role="option"],
+  [role="tab"],
+  [role="switch"],
+  summary,
+  a,
+  label[for],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  input[type="color"],
+  select,
+  .clickable {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
+  /* links inside message bodies stay a hand too */
+  .msg-body a {
+    cursor: pointer;
+  }
+}
+
+/* Thin scrollbars for chat panes */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 2px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Typing indicator dots: the one animation we allow, and it is 3 dots */
+@keyframes typing-dot {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+.typing-dot {
+  animation: typing-dot 1.2s infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Chat message code blocks */
+.msg-codeblock {
+  font-family: var(--font-mono-stack);
+}
+
+/* Native selects (voice picker, purge filters) render their option list
+ * with platform colors otherwise: white panels inside a black app. */
+select option,
+select optgroup {
+  background-color: #101011;
+  color: #f5f5f5;
+}
+
+/* Jump-to-message flash, used by search, pins and permalinks. The row
+ * PULSES three times over 2.4s with a bright left bar so the target is
+ * unmistakable even in a dense scrollback. !important is required: message
+ * rows carry their own entry animation (.msg-row, later in the sheet) and
+ * would otherwise win the cascade and replay msg-in instead of the flash;
+ * the stillness overrides below are also !important so they still win. */
+.flash-highlight {
+  animation: flash-pulse 2.4s ease-out !important;
+}
+@keyframes flash-pulse {
+  0% {
+    background-color: rgba(84, 124, 255, 0.34);
+    box-shadow: inset 3px 0 0 rgba(84, 124, 255, 1);
+  }
+  16% {
+    background-color: rgba(84, 124, 255, 0.07);
+    box-shadow: inset 3px 0 0 rgba(84, 124, 255, 0.4);
+  }
+  32% {
+    background-color: rgba(84, 124, 255, 0.30);
+    box-shadow: inset 3px 0 0 rgba(84, 124, 255, 1);
+  }
+  48% {
+    background-color: rgba(84, 124, 255, 0.05);
+    box-shadow: inset 3px 0 0 rgba(84, 124, 255, 0.4);
+  }
+  64% {
+    background-color: rgba(84, 124, 255, 0.22);
+    box-shadow: inset 3px 0 0 rgba(84, 124, 255, 0.9);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 rgba(84, 124, 255, 0);
+  }
+}
+
+/* Message entry: opacity only. A translateY here re-rasterizes high-res
+ * images and GIFs on every frame of the animation (visible aliasing /
+ * shimmer), while a fade composites without ever resampling the bitmap. */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.msg-row {
+  animation: msg-in 160ms ease-out;
+}
+
+/* ---------- status speech bubble ---------- */
+
+/* Custom status bubbles: genuinely bubble-shaped. Pillowy radius and a tail
+ * that aims back at the avatar the words grow out of. */
+.status-bubble {
+  position: relative;
+  border-radius: 0.875rem;
+  border-top-left-radius: 0.375rem;
+}
+.status-bubble::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: 12px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 8px solid var(--app-raise);
+}
+
+/* ---------- message hover toolbar ---------- */
+
+/* The combined emoji+actions toolbar: appears instantly (no lag) but settles
+ * with a soft rise. pointer-events gate stops invisible-button clicks.
+ * --toolbar-alpha is set from JS: the bar parks where the pointer first
+ * entered the row at near-invisible, then snaps to full opacity only while
+ * the pointer is actually touching inside the bar (contact ramp, not a
+ * fuzzy proximity box). */
+.msg-toolbar {
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1.2);
+  pointer-events: none;
+}
+.group:hover .msg-toolbar,
+.msg-toolbar:focus-within {
+  opacity: var(--toolbar-alpha, 1);
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.group:hover .msg-toolbar:hover,
+.msg-toolbar:focus-within:hover {
+  opacity: 1;
+}
+/* after a quick reaction lands, the bar steps aside until the pointer
+ * re-enters the row: no zombie toolbar hovering over the fresh chip */
+.msg-toolbar[data-dismissed] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Mention badge: rare blue, one soft pulse so it is seen, not heard */
+@keyframes mention-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(84, 124, 255, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(84, 124, 255, 0);
+  }
+}
+.mention-badge {
+  animation: mention-pulse 2s ease-in-out infinite;
+}
+
+/* Button press feedback for the primary actions */
+.press {
+  transition: transform 80ms ease;
+}
+.press:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* Presence dots fade between states instead of snapping */
+.status-dot,
+[data-status] {
+  transition: background-color 200ms ease;
+}
+
+/* ---------- fluid UI layer ---------- */
+
+/* Dialogs and modals land with a scale+fade — longer, silkier curves so the
+ * motion reads as premium instead of instantaneous */
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.dialog-in {
+  animation: dialog-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Context menus and popovers stay quick: latency here reads as lag, not luxury */
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.menu-in {
+  animation: menu-in 150ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: top left;
+}
+
+/* Toasts slide in from the edge */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.toast-in {
+  animation: toast-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+/* Online status dot: a single slow breath so presence feels alive */
+@keyframes status-breathe {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(35, 165, 90, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(35, 165, 90, 0);
+  }
+}
+.status-breathe {
+  animation: status-breathe 3s ease-in-out infinite;
+}
+
+/* Sidebar rows and list items get a gentle hover lift */
+.hover-lift {
+  transition: background-color 120ms ease, transform 120ms ease, color 120ms ease;
+}
+.hover-lift:hover {
+  transform: translateX(2px);
+}
+
+/* Quick-reaction bar on message hover: pops with a tiny spring */
+@keyframes quickbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.quickbar-in {
+  animation: quickbar-in 130ms cubic-bezier(0.2, 0.9, 0.3, 1.4);
+  transform-origin: bottom right;
+}
+
+/* Optimistic (pending) message rows breathe their dim state */
+@keyframes pending-pulse {
+  0%, 100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+.msg-pending {
+  animation: pending-pulse 1.6s ease-in-out infinite;
+}
+
+/* ---------- ai summary: generating shimmer ---------- */
+
+/* Shining skeleton text: the light band sweeps across each line while the
+ * model works, so the wait reads as "generating" instead of "frozen". A
+ * static base keeps the reserved shape; only the sweep moves. */
+.skeleton-sheen {
+  position: relative;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--app-raise);
+}
+.skeleton-sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.09) 38%,
+    rgba(255, 255, 255, 0.16) 50%,
+    rgba(255, 255, 255, 0.09) 62%,
+    transparent
+  );
+  animation: skeleton-sweep 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes skeleton-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* A finished recap lands with the same soft rise messages use: the result
+ * feels produced, not swapped in. */
+@keyframes summary-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.summary-in {
+  animation: summary-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Banner presence strip on profile cards */
+@keyframes banner-sheen {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+/* Failed message rows get a soft red tint */
+.msg-failed {
+  background-color: rgba(229, 72, 77, 0.06);
+  box-shadow: inset 2px 0 0 rgba(229, 72, 77, 0.6);
+}
+
+/* Whispered rows: a dashed ghost rail marks the private aside */
+.whisper-row {
+  box-shadow: inset 2px 0 0 rgba(154, 154, 154, 0.45);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.022) 0px,
+    rgba(255, 255, 255, 0.022) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+.whisper-row .chat-font {
+  color: rgba(245, 245, 245, 0.78);
+}
+
+/* System rows ("x pinned a message") land with a tiny fade of their own */
+.system-row {
+  animation: fade-in 260ms ease-out;
+}
+
+/* Dropdown menu item slide (submenu feel without a submenu) */
+@keyframes item-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.item-in {
+  animation: item-in 130ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Respect users who ask for stillness. The jump flash keeps a STATIC
+ * tint (no animation) so a permalink target is still findable. */
+@media (prefers-reduced-motion: reduce) {
+  .msg-row,
+  .mention-badge,
+  .typing-dot,
+  .flash-highlight,
+  .dialog-in,
+  .menu-in,
+  .toast-in,
+  .status-breathe,
+  .quickbar-in,
+  .msg-pending,
+  .item-in,
+  .view-in,
+  .fade-in,
+  .system-row,
+  .summary-in {
+    animation: none !important;
+  }
+  .skeleton-sheen::after {
+    animation: none !important;
+    opacity: 0.25;
+  }
+  .flash-highlight {
+    background-color: rgba(84, 124, 255, 0.22) !important;
+    box-shadow: inset 3px 0 0 rgba(84, 124, 255, 0.9) !important;
+  }
+  .press,
+  .status-dot,
+  [data-status],
+  .hover-lift,
+  .icon-pop,
+  .msg-toolbar {
+    transition: none !important;
+  }
+}
+
+/* ---------- motion polish ---------- */
+
+/* Main view switches (server -> server, home -> chat) land softly */
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.view-in {
+  animation: view-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Simple opacity fade for secondary surfaces */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 220ms ease-out;
+}
+
+/* Rail icons and standalone icons lift slightly on hover */
+.icon-pop {
+  transition: transform 120ms ease, color 120ms ease;
+}
+.icon-pop:hover {
+  transform: translateY(-1px);
+}
+
+/* Panel slide for right-side profile drawer */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.panel-in {
+  animation: panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Busy (clock) presence dot ticks like a second hand */
+@keyframes busy-tick {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(84, 124, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(84, 124, 255, 0);
+  }
+}
+.busy-breathe {
+  animation: busy-tick 2.5s ease-in-out infinite;
+}
+
+/* ---------- appearance settings ---------- */
+
+/* chat font size: small / medium (default) / large */
+:root {
+  --chat-font: 15px;
+}
+html[data-chat-font='small'] {
+  --chat-font: 13.5px;
+}
+html[data-chat-font='large'] {
+  --chat-font: 16.5px;
+}
+.chat-font {
+  font-size: var(--chat-font);
+}
+
+/* compact density: tighter message rows and groups */
+html[data-compact='1'] .msg-row.grouped {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+html[data-compact='1'] .msg-row.leader {
+  padding-top: 0.375rem;
+}
+html[data-compact='1'] .msg-author-name {
+  font-size: calc(var(--chat-font) - 2px);
+}
+
+/* timestamps on grouped rows can be turned off entirely */
+html[data-timestamps='off'] .msg-row.grouped > span:first-child {
+  display: none;
+}
+
+/* manual stillness switch from settings, same contract as the OS-level one */
+html[data-motion='off'] .msg-row,
+html[data-motion='off'] .mention-badge,
+html[data-motion='off'] .typing-dot,
+html[data-motion='off'] .flash-highlight,
+html[data-motion='off'] .dialog-in,
+html[data-motion='off'] .menu-in,
+html[data-motion='off'] .toast-in,
+html[data-motion='off'] .status-breathe,
+html[data-motion='off'] .quickbar-in,
+html[data-motion='off'] .msg-pending,
+html[data-motion='off'] .item-in,
+html[data-motion='off'] .view-in,
+html[data-motion='off'] .fade-in,
+html[data-motion='off'] .system-row {
+  animation: none !important;
+}
+html[data-motion='off'] .flash-highlight {
+  background-color: rgba(84, 124, 255, 0.22) !important;
+  box-shadow: inset 3px 0 0 rgba(84, 124, 255, 0.9) !important;
+}
+html[data-motion='off'] .press,
+html[data-motion='off'] .status-dot,
+html[data-motion='off'] [data-status],
+html[data-motion='off'] .hover-lift,
+html[data-motion='off'] .icon-pop,
+html[data-motion='off'] .msg-toolbar {
+  transition: none !important;
+}
+
+/* custom emoji: lazy images fade in instead of popping */
+@keyframes emoji-in {
+  from { opacity: 0; transform: scale(0.7); }
+  to { opacity: 1; transform: scale(1); }
+}
+.emoji-img {
+  animation: emoji-in 140ms ease-out;
+}
+html[data-motion='off'] .emoji-img {
+  animation: none !important;
+}
+
+/* rebuild nudge */
+
+/* ---- media host element: the single <video> moved between surfaces ---- */
+[data-media-host] {
+  display: block;
+  width: 100%;
+  max-height: 24rem;
+  background: #000;
+}
+[data-media-host]:focus {
+  outline: none;
+}
+
+/* ---- HyperChat-styled range inputs (volume, zoom, appearance) ----
+   Applies to EVERY slider on the platform: appearance-none, 4px track,
+   12px round thumb, hyper fill driven by --hc-range-fill (set inline by
+   the controlling component), focus-visible ring in the hyper accent. */
+input[type='range'].hc-range,
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type='range'].hc-range::-webkit-slider-runnable-track,
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    to right,
+    var(--hyper) 0,
+    var(--hyper) var(--hc-range-fill, 0%),
+    rgba(255, 255, 255, 0.18) var(--hc-range-fill, 0%)
+  );
+}
+input[type='range'].hc-range::-webkit-slider-thumb,
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 9999px;
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: transform 120ms ease;
+}
+input[type='range'].hc-range:hover::-webkit-slider-thumb,
+input[type='range']:hover::-webkit-slider-thumb {
+  transform: scale(1.18);
+}
+input[type='range'].hc-range::-moz-range-track,
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    to right,
+    var(--hyper) 0,
+    var(--hyper) var(--hc-range-fill, 0%),
+    rgba(255, 255, 255, 0.18) var(--hc-range-fill, 0%)
+  );
+}
+input[type='range'].hc-range::-moz-range-thumb,
+input[type='range']::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+input[type='range'].hc-range:focus-visible,
+input[type='range']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--hyper) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: 9999px;
+}
+
+/* waveform bars around the playhead of a playing voice/audio embed: the
+   leading bars breathe so the strip reads as live audio without animating
+   the whole waveform */
+@keyframes hc-wave-pulse {
+  0%, 100% { transform: scaleY(0.62); }
+  50% { transform: scaleY(1); }
+}
+.hc-wave-live {
+  animation: hc-wave-pulse 900ms ease-in-out infinite;
+  transform-origin: bottom;
+}
+html[data-motion='off'] .hc-wave-live {
+  animation: none !important;
+}
+
+/* call ring pulse: period matches call-ring-in/out wav length (~3.08s) */
+@keyframes hc-call-ring {
+  0% { transform: scale(1); opacity: 0.85; }
+  18% { transform: scale(1.35); opacity: 0.35; }
+  36% { transform: scale(1.55); opacity: 0; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+@keyframes hc-call-arrow {
+  0%, 100% { transform: translateY(0); opacity: 0.95; }
+  18% { transform: translateY(4px); opacity: 1; }
+  36% { transform: translateY(0); opacity: 0.7; }
+}
+.hc-call-ring {
+  animation: hc-call-ring 3.08s ease-out infinite;
+}
+.hc-call-arrow {
+  animation: hc-call-arrow 3.08s ease-out infinite;
+}
+html[data-motion='off'] .hc-call-ring,
+html[data-motion='off'] .hc-call-arrow {
+  animation: none !important;
+}
+
+/* ---- rainbow system ----
+   full-spectrum gradients with enough stops to read as a real rainbow,
+   not two colors blended. shared by translated text and the ??? marker. */
+
+@keyframes rainbow-slide {
+  from { background-position: 0% 50%; }
+  to { background-position: 200% 50%; }
+}
+
+.rainbow-text {
+  background-image: linear-gradient(
+    100deg,
+    #ff5f56 0%,
+    #ff8f3f 8%,
+    #ffc23e 16%,
+    #9dde3b 25%,
+    #3ddc84 33%,
+    #3fd8c8 41%,
+    #45c4ff 50%,
+    #7a9dff 58%,
+    #a78bfa 66%,
+    #d16ba5 74%,
+    #ff5f8f 84%,
+    #ff5f56 92%,
+    #ff5f56 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: rainbow-slide 9s linear infinite;
+}
+
+/* the ??? marker: denser stops + brighter band so it never reads as a
+   two-tone blend */
+@keyframes rainbow-slide-dense {
+  from { background-position: 0% 50%; }
+  to { background-position: 300% 50%; }
+}
+.rainbow-marker {
+  background-image: linear-gradient(
+    90deg,
+    #ff4d4d 0%,
+    #ff7a29 4%,
+    #ffb300 8%,
+    #ffe14d 12%,
+    #c6ff4d 16%,
+    #7dff5c 20%,
+    #3fff98 25%,
+    #2fffcf 30%,
+    #33e0ff 35%,
+    #38b6ff 40%,
+    #547cff 45%,
+    #7d7dff 50%,
+    #a26bff 55%,
+    #c96bff 60%,
+    #e56bff 65%,
+    #ff5fd2 70%,
+    #ff5fa8 75%,
+    #ff5f7e 80%,
+    #ff4d6d 85%,
+    #ff4d4d 90%,
+    #ff4d4d 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  animation: rainbow-slide-dense 6s linear infinite;
+}
+
+/* the translation symbol: the lucide languages glyph as a mask carrying the
+   same live gradient (svg strokes can't take background-clip text) */
+.rainbow-icon-languages {
+  display: inline-block;
+  background-image: linear-gradient(
+    100deg,
+    #ff5f56 0%,
+    #ff8f3f 8%,
+    #ffc23e 16%,
+    #9dde3b 25%,
+    #3ddc84 33%,
+    #3fd8c8 41%,
+    #45c4ff 50%,
+    #7a9dff 58%,
+    #a78bfa 66%,
+    #d16ba5 74%,
+    #ff5f8f 84%,
+    #ff5f56 100%
+  );
+  background-size: 200% 100%;
+  animation: rainbow-slide 9s linear infinite;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 6 6'/%3E%3Cpath d='m4 14 6-6 2-3'/%3E%3Cpath d='M2 5h12'/%3E%3Cpath d='M7 2h1'/%3E%3Cpath d='m22 22-5-10-5 10'/%3E%3Cpath d='M14 18h6'/%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 6 6'/%3E%3Cpath d='m4 14 6-6 2-3'/%3E%3Cpath d='M2 5h12'/%3E%3Cpath d='M7 2h1'/%3E%3Cpath d='m22 22-5-10-5 10'/%3E%3Cpath d='M14 18h6'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+html[data-motion='off'] .rainbow-text,
+html[data-motion='off'] .rainbow-marker,
+html[data-motion='off'] .rainbow-icon-languages,
+html[data-motion='off'] .confetti-piece {
+  animation: none !important;
+}
+
+/* confetti burst for the ??? marker */
+@keyframes confetti-fall {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+    opacity: 1;
+  }
+  85% { opacity: 1; }
+  100% {
+    transform: translate3d(var(--cx, 0px), 105vh, 0) rotate(var(--cr, 720deg));
+    opacity: 0;
+  }
+}
+.confetti-piece {
+  position: fixed;
+  top: 0;
+  width: 8px;
+  height: 14px;
+  pointer-events: none;
+  z-index: 100;
+  animation: confetti-fall var(--cd, 3s) cubic-bezier(0.25, 0.6, 0.5, 1) var(--cdel, 0s) forwards;
+}

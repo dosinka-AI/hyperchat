@@ -1,0 +1,13 @@
+{
+  "name": "HyperChat",
+  "short_name": "HyperChat",
+  "description": "HyperChat is a real-time group chat service with servers, roles, channels, direct messages, read receipts, reactions and image sharing. A Blazar Software\u2122 NRC product.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

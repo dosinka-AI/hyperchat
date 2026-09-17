@@ -1,0 +1,30 @@
+[build]
+  command = "bun install && bunx prisma generate && bunx prisma db push && bun run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# HyperChat is a full Next.js app (App Router server + API routes).
+# Netlify's Next runtime serves the pages and the /api/* routes; the
+# realtime socket.io sidecar runs as a background service (see
+# mini-services/chat-service) and must be deployed alongside (Render,
+# Railway, Fly.io, or a Netlify function with a persistent process).
+# The app degrades gracefully without it: HTTP polling (/api/sync)
+# keeps messages flowing; calls and live presence need the sidecar.
+
+[[redirects]]
+  from = "/socket.io/*"
+  to = "http://localhost:3003/socket.io/:splat"
+  status = 200
+  force = false
+
+[[headers]]
+  for = "/flags/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/sounds/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
