@@ -1,0 +1,27 @@
+# HyperChat full alpha on Fly.io - copy to ./fly.toml, edit the app name.
+# Full walkthrough in DEPLOY.md. The short version:
+#   fly launch --no-deploy        # picks up this Dockerfile, keep port 3000
+#   fly volumes create hyperchat_data --size 1
+#   fly secrets set JWT_SECRET=... INTERNAL_TOKEN=...
+#   fly deploy
+# Your app then serves itself at https://<app-name>.fly.dev with the
+# platform's TLS - the certificate is automatic, so voice calls work.
+
+app = "hyperchat-alpha"
+primary_region = "iad"
+
+[env]
+  LISTEN_PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # realtime presence + scheduled messages need an always-on machine;
+  # do not let the platform park it on zero traffic
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "hyperchat_data"
+  destination = "/data"

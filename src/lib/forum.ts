@@ -15,7 +15,23 @@ type ForumPostRow = {
   createdAt: Date
   updatedAt: Date
   firstMessageId: string | null
+  tags: string
   author: PublicUser
+}
+
+/** ForumPost.tags CSV -> string[] (deduped, original order). */
+export function splitTagCsv(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const t of raw.split(',')) {
+    const name = t.trim()
+    if (name && !seen.has(name)) {
+      seen.add(name)
+      out.push(name)
+    }
+  }
+  return out
 }
 
 export const FORUM_POST_AUTHOR = {
@@ -23,6 +39,32 @@ export const FORUM_POST_AUTHOR = {
     select: { id: true, username: true, displayName: true, avatarUrl: true, avatarColor: true },
   },
 } as const
+
+/** Validate a post's tags input (a list of tag names) against the channel's
+ *  ForumTag rows: 4 tags max, 1-24 chars each, and every name must exist as
+ *  a tag of this channel. Returns the cleaned, deduped names for the CSV. */
+export async function resolvePostTags(
+  channelId: string,
+  input: unknown
+): Promise<{ ok: true; names: string[] } | { ok: false; error: string }> {
+  if (input === undefined || input === null) return { ok: true, names: [] }
+  if (!Array.isArray(input)) return { ok: false, error: 'tags must be a list of tag names.' }
+  if (input.length > 4) return { ok: false, error: 'Posts carry at most 4 tags.' }
+  const seen = new Set<string>()
+  for (const entry of input) {
+    const name = typeof entry === 'string' ? entry.trim() : ''
+    if (name.length < 1 || name.length > 24) return { ok: false, error: 'Tag names are 1-24 characters.' }
+    if (!seen.has(name)) seen.add(name)
+  }
+  const names = [...seen]
+  if (names.length > 0) {
+    const rows = await db.forumTag.findMany({ where: { channelId }, select: { name: true } })
+    const known = new Set(rows.map((r) => r.name))
+    const unknown = names.find((n) => !known.has(n))
+    if (unknown) return { ok: false, error: `Tag "${unknown}" does not exist in this channel.` }
+  }
+  return { ok: true, names }
+}
 
 export function toForumPostSummary(
   post: ForumPostRow,
@@ -36,6 +78,7 @@ export function toForumPostSummary(
     title: post.title,
     pinned: post.pinned,
     locked: post.locked,
+    tags: splitTagCsv(post.tags),
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
     firstMessageId: post.firstMessageId,

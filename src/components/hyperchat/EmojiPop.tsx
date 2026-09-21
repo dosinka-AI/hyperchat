@@ -99,7 +99,7 @@ export function EmojiPopHost() {
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[96] bg-popover border border-border rounded-sm shadow-2xl overflow-hidden menu-in"
+      className="fixed z-[96] glass-raise border border-border rounded-sm shadow-2xl overflow-hidden menu-in"
       style={{ left, top, visibility: pop ? 'visible' : 'hidden' }}
       role="dialog"
       aria-label="pick a reaction"
@@ -138,7 +138,7 @@ function QuickRow({ onPick }: { onPick: (emoji: string) => void }) {
         <button
           key={emoji}
           onClick={() => onPick(emoji)}
-          className="size-8 grid place-items-center rounded-sm text-lg leading-none hover:bg-accent transition-colors"
+          className="size-8 max-[480px]:size-10 grid place-items-center rounded-sm text-lg leading-none hover:bg-accent transition-colors"
           aria-label={`react ${emoji}`}
           title={`react ${emoji}`}
         >

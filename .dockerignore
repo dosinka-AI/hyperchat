@@ -1,0 +1,42 @@
+# keep the docker build context small and free of local state/secrets
+
+# dependencies are re-resolved inside the image (frozen lockfile)
+node_modules
+**/node_modules
+
+# build output and vcs
+.next
+.git
+
+# local secrets - the image must never bake these in
+.env*
+
+# local data (the alpha starts from a fresh, empty database)
+db
+uploads
+upload
+download
+
+# local noise
+*.log
+*.tsbuildinfo
+worklog.md
+IMPORTANT-user-prompts.txt
+chat-service.log
+watchdog.log
+
+# sandbox-only infrastructure and scratch folders
+Caddyfile
+netlify.toml
+NETLIFY.md
+agent-ctx
+tool-results
+skills
+examples
+archive
+tests
+scripts
+prompt
+.standalone-build
+.claude
+.z-ai-config

@@ -1,15 +1,18 @@
 'use client'
 
+import { Button } from '@/components/ui/button'
+import { ArrowLeft } from 'lucide-react'
 import { HyperionMark, HyperionWordmark } from './Logo'
 import { useChatStore } from '@/lib/client/store'
 
-/** Placeholder: the real policy is not written yet, so the page is just a
- *  question mark. Swap the body for the real document when it exists. */
+/** The privacy policy does not exist yet. The entire document is the
+ *  words "not written"; swap the body for the real document when it
+ *  exists. */
 export default function PrivacyView() {
   const setView = useChatStore((s) => s.setView)
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-dvh bg-background flex flex-col">
       <header className="border-b border-border">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center gap-3">
           <button onClick={() => setView('landing')} className="flex items-center gap-2.5" aria-label="back to home">
@@ -20,13 +23,27 @@ export default function PrivacyView() {
       </header>
 
       <main className="flex-1 grid place-items-center px-4 py-16">
-        <div className="text-center select-none">
-          <p className="text-sm font-bold tracking-widest text-muted-foreground lowercase">privacy</p>
-          <p className="mt-3 text-7xl font-extrabold tracking-tight text-muted-foreground/80" aria-label="privacy policy not written yet">
-            ?
-          </p>
+        <div className="max-w-md w-full text-center">
+          <p className="font-mono text-[11px] tracking-widest text-muted-foreground">legal</p>
+          <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Privacy Policy</h1>
+          <p className="mt-4 text-muted-foreground text-pretty">not written</p>
+          <Button variant="outline" className="rounded-sm mt-8" onClick={() => setView('landing')}>
+            <ArrowLeft className="size-4" />
+            Back to home
+          </Button>
         </div>
       </main>
+
+      <footer className="border-t border-border mt-auto">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-6 flex items-center gap-4 text-sm text-muted-foreground">
+          <button className="hover:text-foreground transition-colors" onClick={() => setView('terms')}>
+            Terms
+          </button>
+          <button className="hover:text-foreground transition-colors" onClick={() => setView('landing')}>
+            Hyperion
+          </button>
+        </div>
+      </footer>
     </div>
   )
 }

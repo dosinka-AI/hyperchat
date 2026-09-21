@@ -35,6 +35,7 @@ type MemberRow = {
     avatarColor: string
     bio?: string
     role?: string
+    siteAdmin?: boolean
     customStatus?: string | null
   }
 }
@@ -76,7 +77,7 @@ export function toMemberSummary(m: MemberRow): ServerMemberSummary {
     roleColor: m.customRole?.color ?? null,
     timeoutUntil: m.timeoutUntil ? m.timeoutUntil.toISOString() : null,
     customStatus: m.user.customStatus ?? null,
-    siteAdmin: m.user.role === 'ADMIN',
+    siteAdmin: m.user.siteAdmin === true,
   }
 }
 
@@ -91,6 +92,8 @@ type ServerRow = {
   channels: ChannelRow[]
   categories?: CategoryRow[]
   _count?: { members: number }
+  callChannelsEnabled?: boolean
+  allowGuestRings?: boolean
 }
 
 export function toServerSummary(
@@ -112,6 +115,8 @@ export function toServerSummary(
     myPerms: myPerms ?? (myRole === 'OWNER' ? PERM.ADMINISTRATOR : myRole === 'ADMIN' ? ADMIN_BASE_PERMS : 0),
     channels: server.channels.map(toChannelSummary),
     categories: (server.categories ?? []).map(toCategorySummary),
+    callChannelsEnabled: server.callChannelsEnabled !== false,
+    allowGuestRings: server.allowGuestRings !== false,
   }
 }
 

@@ -67,13 +67,33 @@ export function formatJoinDate(iso: string): string {
 }
 
 export function formatBytes(bytes: number): string {
+  const GB = 1024 * 1024 * 1024
+  if (bytes >= GB) return `${(bytes / GB).toFixed(1)} GB`
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Humanized time left until a stamp: "45s", "12m", "2h", "3d", "30d" —
+ * floors to the largest unit that still has at least one of it. Powers the
+ * vault file-card countdowns; pass `now` to stay in step with a ticking
+ * clock instead of reading Date.now() twice. Days count like a day counter
+ * (ceil: a fresh 30-day tier reads "30d", not "29d"). */
+export function formatRemaining(expiresAt: string | number | Date, now: number = Date.now()): string {
+  const left = new Date(expiresAt).getTime() - now
+  if (!Number.isFinite(left)) return ''
+  if (left <= 0) return 'expired'
+  const s = Math.max(1, Math.floor(left / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h`
+  return `${Math.ceil(left / 86400000)}d`
+}
+
 /** Deterministic grayscale tone for a name, used for server icons and fallback avatars.
- *  HyperChat is monochrome: identity color comes from profile pictures, not hue wheels. */
+ *  Hyperion is monochrome: identity color comes from profile pictures, not hue wheels. */
 const GRAYSCALE = ['#f0f0f0', '#c9c9c9', '#a3a3a3', '#7d7d7d', '#616161', '#4a4a4a', '#3a3a3a', '#2c2c2c', '#222222', '#e0e0e0']
 
 export function colorForName(name: string): string {

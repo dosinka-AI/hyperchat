@@ -55,21 +55,29 @@ function emit(e: YtEmbed) {
 }
 
 /** Parse infoDelivery responses from any tracked embed and refresh its
- *  lastTime / state / duration. One window listener serves every embed. */
+ *  lastTime / state / duration. One window listener serves every embed.
+ *  The widget API answers with JSON *strings*, not objects: parse first. */
 function ensureListener() {
   if (listenerInstalled) return
   listenerInstalled = true
   window.addEventListener('message', (ev: MessageEvent) => {
-    const data = ev.data
-    if (!data || typeof data !== 'object' || data.event !== 'infoDelivery') return
+    let data = ev.data as unknown
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data)
+      } catch {
+        return
+      }
+    }
+    if (!data || typeof data !== 'object' || (data as { event?: unknown }).event !== 'infoDelivery') return
     const src = ev.source as unknown
     for (const e of embeds.values()) {
       if (e.iframe && e.iframe.contentWindow === src) {
-        const t = data.info?.currentTime
+        const t = (data as { info?: { currentTime?: unknown } }).info?.currentTime
         if (typeof t === 'number' && Number.isFinite(t)) e.lastTime = Math.max(0, Math.floor(t))
-        const state = data.info?.playerState
+        const state = (data as { info?: { playerState?: unknown } }).info?.playerState
         if (typeof state === 'number') e.playerState = state
-        const d = data.info?.duration
+        const d = (data as { info?: { duration?: unknown } }).info?.duration
         if (typeof d === 'number' && Number.isFinite(d) && d > 0) e.duration = d
         emit(e)
       }
@@ -86,14 +94,28 @@ function ensurePolling() {
       const w = e.iframe?.contentWindow
       if (!w) continue
       try {
-        w.postMessage(JSON.stringify({ event: 'command', func: 'getCurrentTime', args: [] }), '*')
-        w.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*')
-        w.postMessage(JSON.stringify({ event: 'command', func: 'getDuration', args: [] }), '*')
+        w.postMessage(JSON.stringify({ event: 'command', func: 'getCurrentTime', args: [], channel: 'widget' }), '*')
+        w.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [], channel: 'widget' }), '*')
+        w.postMessage(JSON.stringify({ event: 'command', func: 'getDuration', args: [], channel: 'widget' }), '*')
       } catch {
         // cross-origin hiccup: the next tick retries
       }
     }
   }, 1000)
+}
+
+/** The widget channel only answers command polls after a listening
+ * handshake from the parent window (and, on cross-origin pages, an origin
+ * param on the embed url). Without this the iframe stays silent and every
+ * snapshot is a stale default. Safe to send repeatedly. */
+function wakeWidgetChannel(iframe: HTMLIFrameElement | null) {
+  const w = iframe?.contentWindow
+  if (!w) return
+  try {
+    w.postMessage(JSON.stringify({ event: 'listening', id: Date.now() % 100000, channel: 'widget' }), '*')
+  } catch {
+    // ignore
+  }
 }
 
 function wirePending(e: YtEmbed) {
@@ -119,6 +141,7 @@ export function trackYouTubeEmbed(videoId: string, iframe: HTMLIFrameElement | n
     // a null iframe never orphans a live one (a hidden surface must not
     // steal the element another surface is playing through)
     if (iframe || !existing.iframe) existing.iframe = iframe
+    if (iframe) wakeWidgetChannel(iframe)
     wirePending(existing)
     return
   }
@@ -220,7 +243,7 @@ export function youTubeCommand(iframe: HTMLIFrameElement | null, func: string, a
   const w = iframe?.contentWindow
   if (!w) return
   try {
-    w.postMessage(JSON.stringify({ event: 'command', func, args }), '*')
+    w.postMessage(JSON.stringify({ event: 'command', func, args, channel: 'widget' }), '*')
   } catch {
     // ignore
   }

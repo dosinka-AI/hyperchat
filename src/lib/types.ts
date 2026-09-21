@@ -25,6 +25,8 @@ export type SessionUser = {
   avatarColor: string
   bio: string
   role: string
+  /** gates the admin panel + every /api/admin/* route (Task 6-c) */
+  siteAdmin: boolean
   customStatus: string | null
   pronouns: string | null
   presence: UserPresenceChoice
@@ -49,7 +51,7 @@ export type ServerMemberSummary = PublicUser & {
   roleName: string | null
   roleColor: string | null
   timeoutUntil: string | null
-  /** true when this person administers the whole HyperChat platform,
+  /** true when this person administers the whole Hyperion platform,
    *  distinct from any server-level rank */
   siteAdmin?: boolean
 }
@@ -98,6 +100,11 @@ export type ServerSummary = {
   myPerms: number
   channels: ChannelSummary[]
   categories: CategorySummary[]
+  /** admins can disable call channels in this server's voice channels */
+  callChannelsEnabled: boolean
+  /** may members ring people who are NOT server members into voice channels
+   *  (guests: they join the voice stage but never read the server) */
+  allowGuestRings: boolean
 }
 
 export type ServerDetail = {
@@ -110,6 +117,8 @@ export type ServerDetail = {
     ownerId: string
     createdAt: string
     blockedWords: string
+    callChannelsEnabled: boolean
+    allowGuestRings: boolean
   }
   channels: ChannelSummary[]
   categories: CategorySummary[]
@@ -169,9 +178,24 @@ export type ClientMessage = {
   /** whisper: only the author and this target ever see the row */
   whisperTargetId?: string | null
   whisperTargetName?: string | null
-  /** system rows ("x pinned a message"): content is null, kind carries meaning */
-  systemKind?: 'pin' | 'unpin' | null
-  systemData?: { messageId?: string; byUsername?: string } | null
+  /** sticker message: content is null, the big image + name ride these */
+  stickerName?: string | null
+  stickerUrl?: string | null
+  /** system rows ("x pinned a message", "x started a call"): content is null, kind carries meaning */
+  systemKind?: 'pin' | 'unpin' | 'call' | null
+  systemData?: {
+    messageId?: string
+    byUsername?: string
+    /** call rows: the shared display name for the caller */
+    by?: string
+    byUserId?: string
+    video?: boolean
+    startedAt?: number
+    /** set once the call ended: how long it ran */
+    durationSec?: number | null
+    /** set when nobody ever answered */
+    missed?: boolean
+  } | null
   replyToId: string | null
   replyTo: ReplySummary | null
   /** thread: set on rows that live inside a thread; the value is the root message id */
@@ -187,6 +211,23 @@ export type ClientMessage = {
   forwardedFromName?: string | null
   /** edit history: prior versions, newest last */
   editHistory?: { content: string; at: string }[] | null
+  /** THE VAULT: the ephemeral chunked file this row carries (file-only sends
+   *  have null content). expiresAt drives the live countdown and the flip to
+   *  the expired state once it passes; warnings/scanStatus drive the safety
+   *  chips (amber "careful", "scanning…", "scanned clean", "flagged") */
+  file?: {
+    id: string
+    filename: string
+    mime: string
+    size: number
+    status: string
+    /** short codes from the server-side sniff: 'executable' | 'script' |
+     *  'double-extension' | 'mime-mismatch' | 'archive' */
+    warnings?: string[] | null
+    /** null = never queued | 'pending' | 'clean' | 'detected' | 'failed' | 'skipped' */
+    scanStatus?: string | null
+    expiresAt: string
+  } | null
   authorId: string
   author: PublicUser
   /** server-scoped decoration for channel messages */
@@ -276,6 +317,8 @@ export type ConversationSummary = {
   editPolicy?: 'ALL' | 'OWNER'
   /** group: who can add members = ALL | OWNER */
   invitePolicy?: 'ALL' | 'OWNER'
+  /** group: may members ring non-members into calls? owner can disable */
+  allowCrossRing?: boolean
   /** auto-delete window for 1:1 DMs: 60 | 1440 | 10080, or null when off */
   tempExpiryMinutes?: number | null
   /** the other side of a 1:1 DM; for GROUPs the first other participant
@@ -299,6 +342,9 @@ export type ConversationSummary = {
     authorId: string
   } | null
   otherLastReadAt: string | null
+  /** group read receipts: every OTHER participant's read stamp keyed by
+   *  userId (absent for plain DMs; empty object = nobody else has read) */
+  othersReadAt?: Record<string, string>
   unreadCount: number
 }
 
@@ -316,6 +362,12 @@ export type VoiceParticipantSummary = {
   deafened: boolean
   speaking: boolean
   volume: number
+  /** capturing this channel's audio (drives the red REC badge) */
+  recording: boolean
+  /** streaming their camera (the tile shows video) */
+  video: boolean
+  /** sharing their screen (audio included) */
+  screen: boolean
 }
 
 /** A forum post (Discord-style forum channel). The post's thread reuses the
@@ -327,6 +379,7 @@ export type ForumPostSummary = {
   title: string
   pinned: boolean
   locked: boolean
+  tags: string[]
   createdAt: string
   updatedAt: string
   firstMessageId: string | null
@@ -337,18 +390,63 @@ export type ForumPostSummary = {
   readAt: string | null
 }
 
+/** a forum channel tag: colored chip posts can carry (names unique per channel) */
+export type ForumTagSummary = {
+  id: string
+  channelId: string
+  name: string
+  /** 6-digit hex like #f5f5f5 */
+  color: string
+  createdAt: string
+}
+
+/** a server sticker: big reaction image an admin uploaded (no default set) */
+export type StickerSummary = {
+  id: string
+  serverId: string | null
+  name: string
+  url: string
+  size: number
+  mime: string
+  addedById: string
+  createdAt: string
+}
+
+/** a saved whisper list: a named group I can whisper to in one click
+ *  (memberNames is a username snapshot taken when the list was saved) */
+export type WhisperListSummary = {
+  id: string
+  name: string
+  memberIds: string[]
+  memberNames: string[]
+  createdAt: string
+}
+
 export type SyncResponse = {
   onlineUserIds: string[]
   presenceStatuses: Record<string, PresenceStatus>
   awaySince: Record<string, number>
   /** ISO stamp per offline-but-seen user, for "last online X" displays */
   lastSeen: Record<string, string>
+  /** live calls in my conversations (sidebar indicators, join buttons) */
+  liveCalls?: {
+    conversationId: string
+    callId: string
+    state: 'ringing' | 'active'
+    createdBy: string
+    createdAt: number
+    acceptedAt: number | null
+    participants: { userId: string; username: string; displayName: string | null; avatarUrl: string | null; avatarColor: string; muted: boolean; deafened: boolean; video: boolean; screen: boolean; recording: boolean }[]
+  }[]
   serverStamps: { serverId: string; memberCount: number; channelCount: number; lastMessageAt: string | null }[]
   conversationStamps: {
     conversationId: string
     lastMessageId: string | null
     lastMessageAt: string | null
     otherLastReadAt: string | null
+    /** group read receipts: other participants' stamps keyed by userId
+     *  (single-shape across DMs and groups; unused for DMs) */
+    othersReadAt?: Record<string, string>
     hidden: boolean
     unreadCount: number
   }[]

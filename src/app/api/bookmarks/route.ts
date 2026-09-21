@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { AUTHOR_INCLUDE, toClientMessage } from '@/lib/messages'
-import { badRequest, notFound, serverError, unauthorized } from '@/lib/realtime'
+import { AUTHOR_INCLUDE, canReadMessage, toClientMessage } from '@/lib/messages'
+import { badRequest, forbidden, notFound, serverError, unauthorized } from '@/lib/realtime'
 
 /** Personal saved-messages collection. Bookmarks are private: only the
  *  author can list, add, note, or remove their own bookmarks. */
@@ -76,8 +76,17 @@ export async function POST(req: NextRequest) {
     const messageId = typeof body.messageId === 'string' ? body.messageId : ''
     if (!messageId) return badRequest('Which message?')
 
-    const message = await db.message.findUnique({ where: { id: messageId }, select: { id: true } })
+    const message = await db.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, channelId: true, conversationId: true, whisperTargetId: true, authorId: true },
+    })
     if (!message) return notFound('That message no longer exists.')
+    // a bookmark must point at a message the caller can actually read: a
+    // swapped id must never smuggle foreign content out through the
+    // caller's own bookmark list
+    if (!(await canReadMessage(me.id, message))) {
+      return forbidden('You cannot save that message.')
+    }
 
     const note = typeof body.note === 'string' ? body.note.trim().slice(0, 190) : ''
 

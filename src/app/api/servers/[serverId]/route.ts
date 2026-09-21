@@ -38,6 +38,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
                 avatarColor: true,
                 bio: true,
                 role: true,
+                siteAdmin: true,
                 customStatus: true,
               },
             },
@@ -66,6 +67,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
         ownerId: server.ownerId,
         createdAt: server.createdAt.toISOString(),
         blockedWords: server.blockedWords,
+        callChannelsEnabled: server.callChannelsEnabled,
+        allowGuestRings: server.allowGuestRings,
       },
       channels: channels.map(toChannelSummary),
       categories: server.categories.map(toCategorySummary),
@@ -100,7 +103,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
 
     const body = await req.json()
-    const data: { name?: string; description?: string; iconUrl?: string | null; bannerColor?: string | null; blockedWords?: string; visibility?: string } = {}
+    const data: { name?: string; description?: string; iconUrl?: string | null; bannerColor?: string | null; blockedWords?: string; visibility?: string; callChannelsEnabled?: boolean; allowGuestRings?: boolean } = {}
     if (typeof body.name === 'string') {
       const name = body.name.trim()
       if (name.length < 2 || name.length > 40) {
@@ -116,7 +119,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       if (url === null || /^\/api\/files\/[a-zA-Z0-9\-]+\.(png|jpg|jpeg|gif|webp)$/.test(url)) {
         data.iconUrl = url
       } else {
-        return NextResponse.json({ error: 'Use an image uploaded through HyperChat.' }, { status: 400 })
+        return NextResponse.json({ error: 'Use an image uploaded through Hyperion.' }, { status: 400 })
       }
     }
     if (body.blockedWords !== undefined) {
@@ -138,6 +141,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       } else {
         return badRequest('Banner color must be a hex value like #547cff.')
       }
+    }
+    if (body.callChannelsEnabled !== undefined) {
+      if (typeof body.callChannelsEnabled !== 'boolean') {
+        return NextResponse.json({ error: 'callChannelsEnabled must be true or false.' }, { status: 400 })
+      }
+      data.callChannelsEnabled = body.callChannelsEnabled
+    }
+    if (body.allowGuestRings !== undefined) {
+      if (typeof body.allowGuestRings !== 'boolean') {
+        return NextResponse.json({ error: 'allowGuestRings must be true or false.' }, { status: 400 })
+      }
+      data.allowGuestRings = body.allowGuestRings
     }
     if (body.regenerateInvite === true) {
       if (ctx.baseRole !== 'OWNER') {
@@ -182,6 +197,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         createdAt: server.createdAt.toISOString(),
         blockedWords: server.blockedWords,
         visibility: server.visibility,
+        callChannelsEnabled: server.callChannelsEnabled,
+        allowGuestRings: server.allowGuestRings,
       },
     })
   } catch {

@@ -15,10 +15,10 @@ function Splash() {
   return (
     <div className="min-h-screen bg-background grid place-items-center">
       <div className="flex flex-col items-center gap-4">
-        <HyperionMark className="w-12 h-12" />
+        <HyperionMark className="w-12 h-12 mark-breathe" />
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
           <Spinner />
-          loading HyperChat
+          loading Hyperion
         </div>
       </div>
     </div>

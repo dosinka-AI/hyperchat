@@ -258,7 +258,7 @@ export function ProfileEditor() {
         </div>
 
         {/* ===== the live profile card ===== */}
-        <div className="rounded-sm border border-white/10 bg-app-sidebar overflow-hidden dialog-in shadow-xl">
+        <div className="rounded-sm border border-white/10 glass overflow-hidden dialog-in shadow-xl">
           {/* banner: hover reveals the edit affordances */}
           <div className="relative group/banner">
             <div
@@ -398,10 +398,10 @@ export function ProfileEditor() {
                 {me.role === 'ADMIN' && (
                   <span
                     className="flex items-center gap-1 text-[10px] font-bold tracking-wider text-hyper bg-hyper/10 border border-hyper/40 px-1.5 py-0.5 rounded-sm"
-                    title="administers the entire HyperChat platform"
+                    title="administers the entire Hyperion platform"
                   >
                     <Shield className="size-3" />
-                    HyperChat admin
+                    Hyperion admin
                   </span>
                 )}
               </div>

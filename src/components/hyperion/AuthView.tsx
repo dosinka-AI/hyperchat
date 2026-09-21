@@ -65,7 +65,7 @@ export default function AuthView() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-dvh bg-background flex flex-col pt-[env(safe-area-inset-top)]">
       <header className="border-b border-border">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center gap-3">
           <button onClick={() => setView('landing')} className={STANDALONE ? 'hidden' : 'flex items-center gap-2.5'} aria-label="back to home">
@@ -97,7 +97,7 @@ export default function AuthView() {
 
           <div className="rounded-sm border border-border bg-card p-6 sm:p-8">
             <h1 className="text-xl font-extrabold tracking-tight">
-              {isRegister ? 'create your HyperChat account' : 'sign in to HyperChat'}
+              {isRegister ? 'create your Hyperion account' : 'sign in to Hyperion'}
             </h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
               {isRegister ? 'pick a username and a password. that is all it takes.' : 'welcome back. your servers are waiting.'}
@@ -178,7 +178,7 @@ export default function AuthView() {
             </form>
 
             <p className="mt-5 text-sm text-muted-foreground text-center">
-              {isRegister ? 'already have an account?' : 'new to HyperChat?'}{' '}
+              {isRegister ? 'already have an account?' : 'new to Hyperion?'}{' '}
               <button
                 className="text-hyper hover:underline font-semibold"
                 onClick={() => setView(isRegister ? 'login' : 'register')}

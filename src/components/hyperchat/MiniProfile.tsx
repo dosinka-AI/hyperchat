@@ -4,8 +4,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useChatStore } from '@/lib/client/store'
 import { apiClient } from '@/lib/client/api'
+import { sounds } from '@/lib/client/sounds'
 import { lastOnlineLabel } from '@/lib/client/format'
 import { Avatar } from './Avatar'
+import { Phone, Video } from 'lucide-react'
 import type { PublicUser } from '@/lib/types'
 
 const CARD_W = 256
@@ -25,7 +27,7 @@ export function MiniProfilePopover({
   onClose: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [profile, setProfile] = useState<{ user: PublicUser; mutualServers: { id: string; name: string; iconUrl: string | null }[] } | null>(null)
+  const [profile, setProfile] = useState<{ user: PublicUser; mutualServers: string[] } | null>(null)
   const [failed, setFailed] = useState(false)
 
   const onlineUserIds = useChatStore((s) => s.onlineUserIds)
@@ -149,7 +151,7 @@ export function MiniProfilePopover({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[95] w-64 bg-app-sidebar border border-white/10 rounded-sm shadow-2xl overflow-hidden menu-in"
+      className="fixed z-[95] w-64 glass border border-white/10 rounded-sm shadow-2xl overflow-hidden menu-in"
       role="dialog"
       aria-label={`${username} mini profile`}
     >
@@ -211,6 +213,38 @@ export function MiniProfilePopover({
               <p className="mt-1 text-[10px] text-muted-foreground truncate">
                 last online {lastOnlineLabel(lastSeenIso)}
               </p>
+            )}
+            {/* call row: ring straight from the hover card (never for self) */}
+            {useChatStore.getState().me?.id !== user.id && (
+              <div className="mt-2 flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.play('lightTick')
+                    onClose()
+                    void useChatStore.getState().callUser(user.id)
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 h-7 rounded-sm border border-white/10 bg-app-raise text-[11px] font-semibold hover:border-white/30 transition-colors"
+                  aria-label={`call ${user.username}`}
+                  title="voice call"
+                >
+                  <Phone className="size-3.5" />
+                  call
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.play('lightTick')
+                    onClose()
+                    void useChatStore.getState().callUser(user.id, true)
+                  }}
+                  className="grid place-items-center size-7 rounded-sm border border-white/10 bg-app-raise hover:border-white/30 transition-colors"
+                  aria-label={`video call ${user.username}`}
+                  title="video call"
+                >
+                  <Video className="size-3.5" />
+                </button>
+              </div>
             )}
             {user.bio && (
               <p className="mt-1.5 text-[11px] text-foreground/80 leading-snug line-clamp-2 break-words whitespace-pre-wrap">

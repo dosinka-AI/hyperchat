@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useChatStore } from '@/lib/client/store'
 import { cn } from '@/lib/utils'
 import { sounds } from '@/lib/client/sounds'
-import { releaseYouTubeEmbed, trackYouTubeEmbed } from '@/lib/client/yt-registry'
+import { releaseYouTubeEmbed, trackYouTubeEmbed, youTubeCommand } from '@/lib/client/yt-registry'
 import {
   attachMediaHost,
   detachMediaHost,
@@ -12,21 +12,22 @@ import {
   subscribeMediaHost,
   type MediaHostState,
 } from '@/lib/client/media-host'
-import { MediaControlsBar, YouTubeControlsBar, useYouTubeState } from './MediaSurface'
-import { AudioLines, Minimize2, Music4, Pin, X, Youtube } from 'lucide-react'
+import { MediaControlsBar, useYouTubeState } from './MediaSurface'
+import { AudioLines, Minimize2, Music4, Pause, Pin, Play, X, Youtube } from 'lucide-react'
 
 /** The floating mini media player. It exists for exactly one job: keeping
  *  ACTIVELY PLAYING media alive after you leave the room it lives in (or
  *  pop it out on purpose). The moment playback pauses, ends, or you come
  *  back to the source room, the panel vanishes and the inline embed in the
- *  message row becomes the surface again - the shared host element moves
+ *  message row becomes the surface again — the shared host element moves
  *  between them without ever restarting. A paused panel hides entirely but
  *  keeps its state: resuming happens back at the source embed.
  *
  *  File media plays through the registry's single <video> element (attached
  *  into the panel while it is the owner); YouTube keeps its nocookie iframe
- *  (chrome-free, enablejsapi) with the registry polling its time/state.
- *  Either way the panel carries the picture, not just an audio bar. */
+ *  with its OWN native playbar (controls=1, enablejsapi for tracking) — no
+ *  second Hyperion bar on top of YouTube's. Either way the panel carries the
+ *  picture, not just an audio bar. */
 export type MediaPlayerSource =
   | { kind: 'file'; url: string; mime: string; name: string; at: number; roomId: string | null; popped?: boolean }
   | { kind: 'youtube'; videoId: string; name: string; startAt: number; at: number; roomId: string | null; popped?: boolean }
@@ -69,22 +70,21 @@ function MediaPlayerPanel({
   /** the panel's right to exist: playback must be LIVE (actively playing,
    *  not paused, not finished) AND the user must not be standing in the room
    *  the media lives in (unless they deliberately popped it out). A paused
-   *  or finished source hides the panel completely - playback state itself
+   *  or finished source hides the panel completely — playback state itself
    *  is preserved so the source embed resumes it. */
   const away = player.popped || player.roomId == null || player.roomId !== currentRoom
 
   const ytVideoId = player.kind === 'youtube' ? player.videoId : null
   const ytSnap = useYouTubeState(ytVideoId ?? '')
-  // remember last known play state: a paused video must not reappear in the
-  // mini player after a room switch just because the poll briefly goes null
-  const lastYtLiveRef = useRef(isYouTube)
-  useEffect(() => {
-    if (!ytSnap) return
-    lastYtLiveRef.current = ytSnap.playerState === 1 || ytSnap.playerState === 3
-  }, [ytSnap])
   const ytLive = ytSnap
-    ? ytSnap.playerState === 1 || ytSnap.playerState === 3
-    : lastYtLiveRef.current
+    ? ytSnap.playerState === 1 || ytSnap.playerState === 3 || ytSnap.playerState === -1
+    : true // no poll answer yet: assume live so the iframe gets a chance to start
+  // collapsed header toggle state (the native playbar is unreachable at the
+  // 2px collapsed height). Optimistic between polls: a click flips it now,
+  // the next registry poll reconciles it with the player's real state.
+  const [ytToggled, setYtToggled] = useState(false)
+  const polledPlaying = ytSnap ? ytSnap.playerState === 1 || ytSnap.playerState === 3 : true
+  const ytPlaying = ytToggled ? !polledPlaying : polledPlaying
   const live = isYouTube ? ytLive : !!hostState && !hostState.paused && !hostState.ended
   const visible = away && live
 
@@ -108,7 +108,7 @@ function MediaPlayerPanel({
 
   // finished playback closes the player ONLY when the panel is the surface
   // keeping it alive (away). An inline embed that reaches its end keeps its
-  // host element - the source card owns the ended/replay state itself.
+  // host element — the source card owns the ended/replay state itself.
   const fileEnded = !isYouTube && hostState?.ended === true
   const ytEnded = isYouTube && ytSnap?.playerState === 0
   useEffect(() => {
@@ -210,7 +210,7 @@ function MediaPlayerPanel({
 
   const style: React.CSSProperties = pos
     ? { left: pos.x, top: pos.y }
-    : { right: 16, bottom: 16 }
+    : { right: 16, bottom: 'calc(1rem + env(safe-area-inset-bottom))' }
 
   const showVideo = isVideo && !collapsed
 
@@ -219,7 +219,7 @@ function MediaPlayerPanel({
       data-media-player
       data-player-panel
       style={style}
-      className="fixed z-[70] w-[320px] rounded-sm border border-border bg-app-raise shadow-2xl overflow-hidden select-none will-change-transform"
+      className="fixed z-[70] w-[min(320px,calc(100vw-2rem))] rounded-sm border border-border bg-app-raise shadow-2xl overflow-hidden select-none will-change-transform"
       role="region"
       aria-label="mini media player"
     >
@@ -244,6 +244,24 @@ function MediaPlayerPanel({
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground/90" title={displayName}>
           {displayName}
         </span>
+        {isYouTube && collapsed && (
+          // collapsed YouTube is audio-only: the native playbar lives in the
+          // iframe the user cannot reach at this size, so the header keeps a
+          // single play/pause toggle (postMessage) — no Hyperion play bar
+          <button
+            type="button"
+            onClick={() => {
+              sounds.play('lightTick')
+              setYtToggled((v) => !v)
+              youTubeCommand(ytRef.current, ytPlaying ? 'pauseVideo' : 'playVideo')
+            }}
+            className="grid place-items-center size-6 rounded-sm text-foreground/90 hover:text-foreground hover:bg-white/5 transition-colors"
+            aria-label={ytPlaying ? 'Pause' : 'Play'}
+            title={ytPlaying ? 'pause' : 'play'}
+          >
+            {ytPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+          </button>
+        )}
         {isVideo && (
           <button
             type="button"
@@ -272,21 +290,21 @@ function MediaPlayerPanel({
         </button>
       </div>
 
-      {/* the media itself: the panel carries the picture, not just a bar */}
+      {/* the media itself: the panel carries the picture, not just a bar.
+          YouTube runs with its own native controls — no custom bar below it */}
       {isYouTube ? (
         <div className="bg-black">
           <div className={cn('relative bg-black', collapsed ? 'h-2' : 'aspect-video')}>
             <iframe
               ref={ytRef}
               key={player.at}
-              src={`https://www.youtube-nocookie.com/embed/${player.videoId}?autoplay=1&rel=0&controls=0&modestbranding=1&start=${player.startAt}&enablejsapi=1`}
+              src={`https://www.youtube-nocookie.com/embed/${player.videoId}?autoplay=1&rel=0&controls=1&start=${player.startAt}&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`}
               allow="autoplay; encrypted-media; picture-in-picture"
               allowFullScreen
               title="video"
               className={cn('size-full absolute inset-0 border-0', collapsed && 'pointer-events-none')}
             />
           </div>
-          <YouTubeControlsBar videoId={player.videoId} iframeRef={ytRef} compact={collapsed} />
         </div>
       ) : (
         <div className="bg-black">

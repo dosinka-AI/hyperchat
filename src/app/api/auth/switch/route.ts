@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
         avatarColor: true,
         bio: true,
         role: true,
+        siteAdmin: true,
         customStatus: true,
         pronouns: true,
         presence: true,
@@ -37,11 +38,16 @@ export async function POST(req: NextRequest) {
         bannerUrl: true,
         bannedUntil: true,
         banReason: true,
+        siteBan: { select: { reason: true } },
         createdAt: true,
       },
     })
     if (!user) {
       return NextResponse.json({ error: 'That account no longer exists.' }, { status: 401 })
+    }
+    // site ban (Task 6-c): a UserBan row blocks account switching too
+    if (user.siteBan) {
+      return NextResponse.json({ error: 'account suspended' }, { status: 403 })
     }
     if (user.bannedUntil && user.bannedUntil.getTime() > Date.now()) {
       return NextResponse.json({ error: 'This account is suspended.' }, { status: 403 })
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest) {
 
     await setSessionCookie({ id: user.id, username: user.username })
     const refreshed = await createSessionToken({ id: user.id, username: user.username })
-    const { bannedUntil: _bu, banReason: _br, ...snapshot } = user
+    const { bannedUntil: _bu, banReason: _br, siteBan: _sb, ...snapshot } = user
     return NextResponse.json({ user: snapshot, token: refreshed })
   } catch {
     return NextResponse.json({ error: 'Something went wrong. Try again.' }, { status: 500 })

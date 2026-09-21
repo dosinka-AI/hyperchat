@@ -72,6 +72,24 @@ export async function GET() {
           },
         })
 
+        // group read receipts: WHO else has read, keyed by userId. DMs keep
+        // the single-partner shape from the row we already fetched (harmless
+        // and keeps one payload shape); groups fan out to every other
+        // participant — filtered to CURRENT members so a departed member's
+        // stale read row never haunts the receipt row.
+        let othersReadAt: Record<string, string> = {}
+        if (isGroup) {
+          const othersRead = await db.readState.findMany({
+            where: { scopeKey: `conversation:${conversationId}`, userId: { not: me.id } },
+          })
+          const memberIds = new Set(others.map((pt) => pt.userId))
+          for (const r of othersRead) {
+            if (memberIds.has(r.userId)) othersReadAt[r.userId] = r.lastReadAt.toISOString()
+          }
+        } else if (otherRead) {
+          othersReadAt[other.id] = otherRead.lastReadAt.toISOString()
+        }
+
         return {
           id: conversationId,
           kind: isGroup ? 'GROUP' : 'DM',
@@ -81,6 +99,7 @@ export async function GET() {
           limitRaised: isGroup ? conversation.limitRaised : false,
           editPolicy: isGroup ? conversation.editPolicy : undefined,
           invitePolicy: isGroup ? conversation.invitePolicy : undefined,
+          allowCrossRing: isGroup ? conversation.allowCrossRing : undefined,
           tempExpiryMinutes: isGroup ? null : conversation.tempExpiryMinutes,
           otherUser: {
             id: other.id,
@@ -114,6 +133,7 @@ export async function GET() {
               }
             : null,
           otherLastReadAt: otherRead ? otherRead.lastReadAt.toISOString() : null,
+          othersReadAt,
           unreadCount,
         }
       })

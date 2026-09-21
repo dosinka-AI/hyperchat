@@ -7,6 +7,7 @@ import { ApiError } from '@/lib/client/api'
 import { Avatar } from './Avatar'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { Spinner } from '@/components/ui/spinner'
 import { useToast } from '@/hooks/use-toast'
 import { confirmDialog } from './ConfirmDialog'
@@ -34,6 +35,7 @@ export function GroupSettingsDialog({
   const setGroupPhoto = useChatStore((s) => s.setGroupPhoto)
   const setGroupPolicies = useChatStore((s) => s.setGroupPolicies)
   const setGroupLimit = useChatStore((s) => s.setGroupLimit)
+  const setGroupCrossRing = useChatStore((s) => s.setGroupCrossRing)
   const leaveGroup = useChatStore((s) => s.leaveGroup)
   const { toast } = useToast()
 
@@ -247,6 +249,23 @@ export function GroupSettingsDialog({
                 >
                   {c.limitRaised ? '50 (lower to 5)' : '5 (raise to 50)'}
                 </Button>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-app-raise px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold">cross ringing</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">let members ring people outside this group into calls. off = only group members can be rung.</p>
+                </div>
+                <Switch
+                  checked={c.allowCrossRing !== false}
+                  disabled={policyBusy}
+                  onCheckedChange={(v) => {
+                    sounds.play('lightTick')
+                    void setGroupCrossRing(conversationId!, v).catch(() => {
+                      toast({ title: 'could not change cross ringing', description: 'try again in a moment.' })
+                    })
+                  }}
+                  aria-label="toggle cross ringing"
+                />
               </div>
             </section>
           )}

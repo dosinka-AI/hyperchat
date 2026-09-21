@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 
-/** The official HyperChat mark: the white italic H on black. */
+/** The official Hyperion mark: the white italic H on black. */
 export function HyperionMark({ className }: { className?: string }) {
   return (
      
@@ -17,7 +17,7 @@ export function HyperionMark({ className }: { className?: string }) {
 export function HyperionWordmark({ className }: { className?: string }) {
   return (
     <span className={cn('font-extrabold italic tracking-tight text-foreground', className)}>
-      HYPERCHAT
+      HYPERION
     </span>
   )
 }

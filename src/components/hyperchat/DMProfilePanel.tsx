@@ -7,7 +7,7 @@ import { sounds } from '@/lib/client/sounds'
 import { lastOnlineLabel } from '@/lib/client/format'
 import { Avatar } from './Avatar'
 import { awayForLabel } from './MessageList'
-import { AtSign, Users, X } from 'lucide-react'
+import { AtSign, Phone, Users, Video, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { PublicUser } from '@/lib/types'
 
@@ -23,7 +23,7 @@ export function DMProfilePanel({ conversationId, onClose }: { conversationId: st
   const lastSeen = useChatStore((s) => s.lastSeen)
   const blockedUserIds = useChatStore((s) => s.blockedUserIds)
   const openProfile = useChatStore((s) => s.openProfile)
-  const [profile, setProfile] = useState<{ user: PublicUser; mutualServers: { id: string; name: string; iconUrl: string | null }[] } | null>(null)
+  const [profile, setProfile] = useState<{ user: PublicUser; mutualServers: string[] } | null>(null)
 
   const otherUser = conversation?.otherUser
   const username = otherUser?.username
@@ -73,7 +73,7 @@ export function DMProfilePanel({ conversationId, onClose }: { conversationId: st
 
   return (
     <aside
-      className="hidden lg:flex w-80 shrink-0 bg-app-sidebar border-l border-white/10 flex-col panel-in"
+      className="fixed inset-y-0 right-0 z-40 w-[85vw] max-w-sm lg:static lg:w-80 lg:max-w-none lg:shrink-0 bg-app-sidebar border-l border-white/10 flex flex-col shadow-2xl lg:shadow-none panel-in pb-[env(safe-area-inset-bottom)]"
       aria-label={`${user.username} profile`}
     >
       {/* profile head: solid-color banner, avatar breaking the bottom edge on
@@ -120,11 +120,11 @@ export function DMProfilePanel({ conversationId, onClose }: { conversationId: st
         )}
         <button
           onClick={onClose}
-          className="absolute top-2 right-2 z-20 p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-black/40 transition-colors"
+          className="absolute top-2 right-2 z-20 size-9 grid place-items-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-black/40 transition-colors"
           aria-label="hide profile panel"
           title="hide profile panel"
         >
-          <X className="size-3.5" />
+          <X className="size-4" />
         </button>
       </div>
 
@@ -177,6 +177,35 @@ export function DMProfilePanel({ conversationId, onClose }: { conversationId: st
           )}
         </p>
 
+        {/* call row: ring this person straight from their profile */}
+        {(!me || user.id !== me.id) && !blocked && (
+          <div className="mt-3 flex gap-1.5">
+            <button
+              onClick={() => {
+                sounds.play('lightTick')
+                void useChatStore.getState().callUser(user.id)
+              }}
+              className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-sm border border-white/10 bg-app-raise text-[13px] font-semibold hover:border-white/30 transition-colors"
+              aria-label={`call ${user.username}`}
+              title="voice call"
+            >
+              <Phone className="size-4" />
+              call
+            </button>
+            <button
+              onClick={() => {
+                sounds.play('lightTick')
+                void useChatStore.getState().callUser(user.id, true)
+              }}
+              className="grid place-items-center size-9 rounded-sm border border-white/10 bg-app-raise hover:border-white/30 transition-colors"
+              aria-label={`video call ${user.username}`}
+              title="video call"
+            >
+              <Video className="size-4" />
+            </button>
+          </div>
+        )}
+
         {user.bio && (
           <p className="mt-3 text-[13px] text-foreground/85 leading-relaxed break-words whitespace-pre-wrap">{user.bio}</p>
         )}
@@ -186,29 +215,9 @@ export function DMProfilePanel({ conversationId, onClose }: { conversationId: st
             <Users className="size-3" />
             mutual servers
           </p>
-          {profile === null ? (
-            <p className="text-xs text-muted-foreground mt-1">…</p>
-          ) : profile.mutualServers.length > 0 ? (
-            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-              {profile.mutualServers.map((s) => (
-                <span
-                  key={s.id}
-                  title={s.name}
-                  className="size-7 rounded-sm overflow-hidden border border-white/10 grid place-items-center bg-app-raise"
-                >
-                  {s.iconUrl ? (
-                    <img src={s.iconUrl} alt={s.name} className="size-full object-cover" draggable={false} />
-                  ) : (
-                    <span className="text-[9px] font-bold text-muted-foreground">
-                      {s.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
-                    </span>
-                  )}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-foreground/80 mt-1">none</p>
-          )}
+          <p className="text-xs text-foreground/80 mt-1">
+            {profile === null ? '…' : profile.mutualServers.length > 0 ? profile.mutualServers.join(', ') : 'none'}
+          </p>
         </div>
 
         {blocked && (

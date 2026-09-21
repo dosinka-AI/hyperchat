@@ -53,6 +53,14 @@ export function conversationRoom(conversationId: string): string {
   return `conversation:${conversationId}`
 }
 
+/** The send-only room a cross-rung call GUEST sits in: call state, their own
+ *  reduced message echoes and read receipts — never the conversation's real
+ *  payloads. Call-channel space ids (`convId~room`) resolve to their base
+ *  conversation, mirroring the sidecar's guest room. */
+export function guestRoom(conversationId: string): string {
+  return `conversation-guest:${baseConversationIdOf(conversationId)}`
+}
+
 export function userRoom(userId: string): string {
   return `user:${userId}`
 }
@@ -62,6 +70,59 @@ export function serverRoom(serverId: string): string {
 }
 
 const PRESENCE_URL = 'http://127.0.0.1:3004/presence'
+const CALLS_URL = 'http://127.0.0.1:3004/calls'
+
+/** The owning conversation of a call space id: plain ids map to themselves,
+ *  room space ids (`convId~room`) strip their suffix. Mirrors the client's
+ *  call-space helper without the 'use client' dependency. */
+function baseConversationIdOf(spaceId: string): string {
+  const i = spaceId.indexOf('~')
+  return i === -1 ? spaceId : spaceId.slice(0, i)
+}
+
+export type LiveCallSnapshot = {
+  conversationId: string
+  callId: string
+  state: 'ringing' | 'active'
+  createdBy: string
+  createdAt: number
+  acceptedAt: number | null
+  participants: {
+    userId: string
+    username: string
+    displayName: string | null
+    avatarUrl: string | null
+    avatarColor: string
+    muted: boolean
+    deafened: boolean
+    video: boolean
+    screen: boolean
+    recording: boolean
+  }[]
+}
+
+/** Fetch the registry of live calls from the realtime service, filtered to
+ *  the conversations I belong to (sidebar indicators, join buttons). Call
+ *  rooms hang off a conversation at a synthetic space id (`convId~room`):
+ *  those pass when the BASE conversation is mine. Best effort: [] when the
+ *  sidecar is down. */
+export async function fetchLiveCalls(myConversationIds: string[]): Promise<LiveCallSnapshot[]> {
+  if (!myConversationIds.length) return []
+  try {
+    const res = await fetch(CALLS_URL, {
+      headers: { 'x-internal-token': INTERNAL_TOKEN },
+      cache: 'no-store',
+    })
+    if (!res.ok) return []
+    const data = (await res.json()) as { calls?: LiveCallSnapshot[] }
+    const wanted = new Set(myConversationIds)
+    return (data.calls ?? []).filter(
+      (c) => wanted.has(c.conversationId) || wanted.has(baseConversationIdOf(c.conversationId))
+    )
+  } catch {
+    return []
+  }
+}
 
 /** Fetch the raw voice presence list for a channel from the realtime
  *  service. Returns [] when the sidecar is down (voice is best-effort). */

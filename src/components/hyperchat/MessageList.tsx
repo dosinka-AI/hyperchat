@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useChatStore } from '@/lib/client/store'
 import type { ClientMessage, MessageAttachment } from '@/lib/types'
 import { renderMessageContent } from '@/lib/client/markdown'
@@ -12,10 +12,12 @@ import { isBlanked, subscribeBlanked } from '@/lib/client/media-blank'
 import { Spinner } from '@/components/ui/spinner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { Trash2, Pencil, Pin, PinOff, SmilePlus, Check, Reply, Copy, ArrowDown, Reply as ReplyIcon, Bookmark, BookmarkCheck, BookmarkPlus, Clock, AlertCircle, RotateCcw, X, BellRing, Download, Play, FileText, FileArchive, FileAudio, FileVideo, FileSpreadsheet, FileCode, EyeOff, MessagesSquare, Forward, History, Languages, Link2, MoreHorizontal } from 'lucide-react'
+import { Trash2, Pencil, Pin, PinOff, SmilePlus, Check, Reply, Copy, ArrowDown, Reply as ReplyIcon, Bookmark, BookmarkCheck, BookmarkPlus, Clock, AlertCircle, RotateCcw, X, BellRing, Download, Play, FileText, FileArchive, FileAudio, FileVideo, FileSpreadsheet, FileCode, EyeOff, MessagesSquare, Forward, History, Languages, Link2, MoreHorizontal, Phone, PhoneMissed, Video } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { sounds } from '@/lib/client/sounds'
 import { apiClient } from '@/lib/client/api'
+import { downloadFile } from '@/lib/client/download'
+import { useToast } from '@/hooks/use-toast'
 import { loadHiddenIds, hideMessageForMe } from '@/lib/client/hidden'
 import { EmojiGrid, mostUsedEmojis, rememberRecent, rememberUsage } from './EmojiPicker'
 import { openContextMenu } from './ContextMenu'
@@ -23,8 +25,113 @@ import { openEmojiPop } from './EmojiPop'
 import { MiniProfilePopover } from './MiniProfile'
 import { EmojiText } from '@/lib/client/serverEmoji'
 import { ReactionChips } from './ReactionChips'
+import { VaultFileCard } from './VaultFileCard'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
+
+/** Group read receipt: the row of overlapping reader avatars that rides
+ *  under the last message of mine each reader has covered. Earliest reader
+ *  first, capped at five faces with a muted +N chip; the title lists
+ *  everyone who saw it. Null readers render nothing. */
+function GroupReadReceipt({
+  readers,
+  participants,
+}: {
+  readers: { userId: string; at: number }[] | null
+  participants: { id: string; username: string; displayName: string | null; avatarUrl: string | null; avatarColor: string }[]
+}) {
+  if (!readers || readers.length === 0) return null
+  const shown = readers.slice(0, 5)
+  const extra = readers.length - shown.length
+  const nameOf = (userId: string) => {
+    const p = participants.find((pt) => pt.id === userId)
+    return p?.displayName || p?.username || userId
+  }
+  return (
+    <div
+      className="flex items-center gap-1.5 mt-1"
+      title={`${readers.map((r) => nameOf(r.userId)).join(', ')} · seen`}
+      aria-live="polite"
+    >
+      <span className="flex items-center -space-x-1.5" aria-hidden="true">
+        {shown.map((r) => {
+          const p = participants.find((pt) => pt.id === r.userId)
+          return (
+            <Avatar
+              key={r.userId}
+              name={p?.username ?? r.userId}
+              color={p?.avatarColor}
+              url={p?.avatarUrl}
+              size="sm"
+              className="rounded-full ring-2 ring-app-chat"
+            />
+          )
+        })}
+        {extra > 0 && (
+          <span className="grid place-items-center size-6 rounded-full bg-app-raise ring-2 ring-app-chat text-[9px] font-semibold text-muted-foreground select-none">
+            +{extra}
+          </span>
+        )}
+      </span>
+      <span className="text-[10px] text-hyper">seen</span>
+    </div>
+  )
+}
+
+/** The edit box: a fresh mount means an edit just started, so the caret is
+ *  placed at the END of the text (you are fixing the tail of what you wrote,
+ *  never re-reading it from the top). Rows grow with the draft, and the
+ *  commit is optimistic: the store swaps the words instantly, the server
+ *  round trip is invisible. */
+function EditBox({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string
+  onCommit: (text: string) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState(initial)
+  const ref = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    const end = el.value.length
+    el.setSelectionRange(end, end)
+  }, [])
+
+  const rows = Math.max(2, Math.min(8, value.split('\n').length + 1))
+
+  return (
+    <div className="mt-0.5 msg-land">
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            const text = value.trim()
+            if (text) onCommit(text)
+            onCancel()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            onCancel()
+          }
+        }}
+        rows={rows}
+        className="chat-font w-full bg-app-raise border border-hyper/40 rounded-sm px-2 py-1.5 leading-[1.4] outline-none resize-none scroll-thin"
+        aria-label="edit message"
+      />
+      <p className="mt-1 text-[10px] text-muted-foreground select-none">
+        enter to save · escape to cancel
+      </p>
+    </div>
+  )
+}
 
 /** GIF urls from the big libraries (and uploads) all end in .gif; the odd
  *  one with query strings still carries the extension before them. */
@@ -351,6 +458,30 @@ function ImageEmbed({
   )
 }
 
+/** Iframe-safe download affordance for attachment chips + the lightbox: the
+ *  blob/a.download path in normal tabs, the window.open fallback when the app
+ *  is embedded in a sandboxed iframe where programmatic download clicks are
+ *  silently dropped (see src/lib/client/download.ts). */
+function useSafeDownload() {
+  const { toast } = useToast()
+  return (url: string, filename: string) =>
+    downloadFile({
+      url,
+      filename,
+      onStatus: (kind) => {
+        if (kind === 'blocked-fallback') {
+          sounds.play('error')
+          toast({ title: 'download blocked', description: 'open this app in a real browser tab, then try again.' })
+          return
+        }
+        if (kind !== 'expired' && kind !== 'notready' && kind !== 'flagged') {
+          sounds.play('error')
+          toast({ title: 'download failed', description: 'try again in a moment.' })
+        }
+      },
+    })
+}
+
 /** Attachments under a message: image grid (click opens the lightbox) plus
  *  playable media embeds and downloadable file chips. Pending optimistic
  *  rows reuse this verbatim. */
@@ -374,6 +505,7 @@ function MessageAttachments({
   isBookmarked: boolean
   onToggleBookmark: () => void
 }) {
+  const safeDownload = useSafeDownload()
   const images = attachments.filter((a) => a.mime.startsWith('image/'))
   const files = attachments.filter((a) => !a.mime.startsWith('image/'))
   return (
@@ -440,12 +572,18 @@ function MessageAttachments({
               )
             }
             const Icon = fileIconFor(f.mime, f.name)
+            // a button + the shared download helper instead of a bare
+            // <a download>: sandboxed iframes (preview panels) silently drop
+            // programmatic blob clicks — the helper falls back to a
+            // top-level navigation that the route answers with
+            // Content-Disposition: attachment
             return (
-              <a
+              <button
                 key={`${f.url}-${f.name}`}
-                href={f.url}
-                download
-                className="flex items-center gap-2.5 bg-app-raise border border-white/10 rounded-sm px-3 py-2 max-w-sm cursor-pointer hover:border-white/25 transition-colors"
+                type="button"
+                onClick={() => void safeDownload(f.url, f.name)}
+                className="flex w-full items-center gap-2.5 bg-app-raise border border-white/10 rounded-sm px-3 py-2 max-w-sm cursor-pointer hover:border-white/25 transition-colors text-left"
+                aria-label={`Download ${f.name}`}
               >
                 <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{f.name}</span>
@@ -457,7 +595,7 @@ function MessageAttachments({
                 >
                   <Download className="size-3.5" />
                 </span>
-              </a>
+              </button>
             )
           })}
         </div>
@@ -527,7 +665,6 @@ function MessageBody({
   openProfile,
   editing,
   editDraft,
-  setEditDraft,
   setEditingId,
   editMessage,
   room,
@@ -544,7 +681,6 @@ function MessageBody({
   openProfile: (username: string) => Promise<void>
   editing: boolean
   editDraft: string
-  setEditDraft: (v: string) => void
   setEditingId: (v: string | null) => void
   editMessage: (room: string, messageId: string, content: string) => Promise<void>
   room: string
@@ -558,26 +694,11 @@ function MessageBody({
 }) {
   if (editing) {
     return (
-      <div className="mt-0.5">
-        <textarea
-          autoFocus
-          value={editDraft}
-          onChange={(e) => setEditDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              const text = editDraft.trim()
-              if (text) void editMessage(room, msg.id, text)
-              setEditingId(null)
-            } else if (e.key === 'Escape') {
-              setEditingId(null)
-            }
-          }}
-          rows={2}
-          className="chat-font w-full bg-app-raise border border-hyper/40 rounded-sm px-2 py-1.5 leading-[1.4] outline-none resize-none scroll-thin"
-          aria-label="edit message"
-        />
-      </div>
+      <EditBox
+        initial={editDraft}
+        onCommit={(text) => void editMessage(room, msg.id, text)}
+        onCancel={() => setEditingId(null)}
+      />
     )
   }
 
@@ -597,6 +718,24 @@ function MessageBody({
             pingsEveryone: msg.pingsEveryone,
             onPermalink,
           })}
+        </div>
+      )}
+      {msg.stickerUrl && (
+        <div className="mt-0.5 -mb-1">
+          <img
+            src={msg.stickerUrl}
+            alt={msg.stickerName ?? 'sticker'}
+            loading="lazy"
+            decoding="async"
+            className="h-[140px] w-auto max-w-[min(280px,100%)] object-contain rounded-sm cursor-zoom-in hover:brightness-110 transition"
+            onClick={() => setLightbox({ url: msg.stickerUrl!, author: msg.author.username })}
+            aria-label={`sticker: ${msg.stickerName ?? ''}`}
+          />
+          {msg.stickerName && (
+            <p className="mt-0.5 text-[10px] font-medium tracking-wide text-muted-foreground/70 select-none">
+              {msg.stickerName}
+            </p>
+          )}
         </div>
       )}
       {msg.imageUrl && (
@@ -622,7 +761,12 @@ function MessageBody({
           onToggleBookmark={onToggleBookmark}
         />
       )}
-      {/* translation: the English rendering rides under the original */}
+      {/* THE VAULT: the ephemeral chunked file this row carries — live
+          countdown, expired flip, blob download */}
+      {msg.file && <VaultFileCard file={msg.file} />}
+      {/* translation: the English rendering rides under the original. The
+          rainbow belongs to the button that asks for it, not the words it
+          returns, so the result stays quiet and readable */}
       {translation && (translation.loading || translation.text) && (
         <div className="mt-1.5 pl-2 border-l-2 border-white/10 text-foreground/80">
           {translation.loading ? (
@@ -632,9 +776,9 @@ function MessageBody({
             </div>
           ) : (
             <>
-              <div className="chat-font leading-[1.4] break-words text-[13.5px] rainbow-text">{translation.text}</div>
-              <div className="text-[10px] mt-0.5 flex items-center gap-0.5 select-none rainbow-text">
-                <span className="rainbow-icon-languages size-2.5 shrink-0" aria-hidden="true" />
+              <div className="chat-font leading-[1.4] break-words text-[13.5px] text-foreground/75">{translation.text}</div>
+              <div className="text-[10px] mt-0.5 flex items-center gap-1 select-none text-muted-foreground">
+                <Languages className="size-2.5 shrink-0" aria-hidden="true" />
                 <span className="font-semibold">translated</span>
               </div>
             </>
@@ -858,7 +1002,7 @@ function MessageToolbar({
         <button
           key={emoji}
           onClick={() => react(emoji)}
-          className="size-8 grid place-items-center rounded-sm text-lg leading-none hover:scale-110 active:scale-90 hover:bg-accent transition-all"
+          className="size-9 grid place-items-center rounded-sm text-xl leading-none hover:scale-110 active:scale-90 hover:bg-accent transition-all"
           aria-label={`React ${emoji}`}
           title={`React ${emoji}`}
         >
@@ -930,6 +1074,85 @@ function MessageToolbar({
   )
 }
 
+/** 92s -> "1m 32s"; 3725s -> "1h 02m". */
+function callDurationLabel(sec: number): string {
+  if (sec < 60) return `${sec}s`
+  const m = Math.floor(sec / 60)
+  if (m < 60) return `${m}m ${String(sec % 60).padStart(2, '0')}s`
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+}
+
+/** The call's chat row: "x started a call" while it lives (with a join
+ *  button while the call still runs), the duration stamped on once it
+ *  ends, or "missed call from x" when nobody answered. The caller alone
+ *  can wipe it: a withdrawn attempt leaves no trace. */
+function CallSystemRow({ msg, room, isLastCallRow }: { msg: ClientMessage; room: string; isLastCallRow: boolean }) {
+  const conversationId = room.startsWith('conversation:') ? room.slice('conversation:'.length) : ''
+  const me = useChatStore((s) => s.me)
+  const liveCall = useChatStore((s) => (conversationId ? s.liveCalls[conversationId] : undefined))
+  const activeCall = useChatStore((s) => s.activeCall)
+  const joinCall = useChatStore((s) => s.joinCall)
+  const deleteMessage = useChatStore((s) => s.deleteMessage)
+
+  const data = msg.systemData
+  const by = data?.by || data?.byUsername || msg.author.username
+  const mine = msg.authorId === me?.id || data?.byUserId === me?.id
+  const missed = data?.missed === true
+  const duration = typeof data?.durationSec === 'number' ? data.durationSec : null
+  const live = !!liveCall
+  const inThisCall = !!activeCall && activeCall.conversationId === conversationId
+
+  return (
+    <div className="w-full flex items-center justify-start gap-2 px-3 sm:px-4 py-1.5 select-none system-row group/call">
+      {missed ? (
+        <PhoneMissed className="size-3.5 shrink-0 text-red-400/80" aria-hidden="true" />
+      ) : data?.video ? (
+        <Video className="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+      ) : (
+        <Phone className="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+      )}
+      <span className="text-xs text-muted-foreground">
+        {missed
+          ? `missed call from ${by}`
+          : `${by} started a call${duration !== null ? ` · ${callDurationLabel(duration)}` : ''}`}
+      </span>
+      {live && isLastCallRow && !inThisCall && (
+        <button
+          type="button"
+          onClick={() => {
+            sounds.play('callEnter')
+            void joinCall(conversationId)
+          }}
+          className="px-2 py-0.5 rounded-full bg-emerald-400/15 border border-emerald-400/30 text-[10px] font-bold text-emerald-300 hover:bg-emerald-400/25 transition-colors"
+          aria-label="join the ongoing call"
+        >
+          join
+        </button>
+      )}
+      {live && isLastCallRow && inThisCall && (
+        <span className="px-2 py-0.5 rounded-full bg-emerald-400/10 border border-emerald-400/20 text-[10px] font-bold text-emerald-300/90 flex items-center gap-1">
+          <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
+          live
+        </span>
+      )}
+      {mine && (
+        <button
+          type="button"
+          onClick={() => {
+            sounds.play('lightTick')
+            void deleteMessage(room, msg.id)
+          }}
+          className="grid place-items-center size-5 rounded-sm text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover/call:opacity-100 focus-visible:opacity-100 transition-all"
+          aria-label="delete this call message"
+          title="delete - they will never know you called"
+        >
+          <Trash2 className="size-3" />
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function MessageList({ room }: { room: string }) {
   const roomState = useChatStore((s) => s.rooms[room])
   const me = useChatStore((s) => s.me)
@@ -946,9 +1169,20 @@ export function MessageList({ room }: { room: string }) {
   const createReminder = useChatStore((s) => s.createReminder)
   const typingUsers = useChatStore((s) => s.typing[room])
   const otherReadAt = useChatStore((s) => s.otherReadAt)
-  const groupReadAt = useChatStore((s) => s.groupReadAt)
+  const setRoomAtBottom = useChatStore((s) => s.setRoomAtBottom)
+  // group read receipts: the conversation (kind + participant faces) and
+  // this conversation's per-reader stamps (groups only; DMs have none)
   const conversations = useChatStore((s) => s.conversations)
+  const groupReadStamps = useChatStore((s) =>
+    room.startsWith('conversation:') ? s.groupReadAt[room.slice('conversation:'.length)] : undefined
+  )
+  // channel read receipts (friends only): my friends' latest read stamps
+  // for THIS channel + the server member list to resolve their faces
+  const channelFriendStamps = useChatStore((s) =>
+    room.startsWith('channel:') ? s.channelFriendReadAt[room.slice('channel:'.length)] : undefined
+  )
   const activeServerId = useChatStore((s) => s.activeServerId)
+  const serverMembers = useChatStore((s) => (activeServerId ? s.serverMembers[activeServerId] : undefined))
   const servers = useChatStore((s) => s.servers)
   const openProfile = useChatStore((s) => s.openProfile)
   const setPinsOpen = useChatStore((s) => s.setPinsOpen)
@@ -957,6 +1191,10 @@ export function MessageList({ room }: { room: string }) {
   const jumpToMessage = useChatStore((s) => s.jumpToMessage)
   const requestPresent = useChatStore((s) => s.requestPresent)
   const presentRequest = useChatStore((s) => s.presentRequest)
+  // reply-jump return pill: where the viewer stood before the last jump
+  const returnPoint = useChatStore((s) => s.returnPoint)
+  const setReturnPoint = useChatStore((s) => s.setReturnPoint)
+  const clearReturnPoint = useChatStore((s) => s.clearReturnPoint)
   const editRequest = useChatStore((s) => s.editRequest)
   const blockedUserIds = useChatStore((s) => s.blockedUserIds)
   const openThread = useChatStore((s) => s.openThread)
@@ -977,11 +1215,7 @@ export function MessageList({ room }: { room: string }) {
     () => (roomState?.messages ?? []).filter((m) => !hiddenIds.has(m.id) && !m.threadOfId),
     [roomState?.messages, hiddenIds]
   )
-  const isConversation = room.startsWith('conversation:')
-  const conversationId = isConversation ? room.slice('conversation:'.length) : null
-  const conversation = conversationId ? conversations.find((c) => c.id === conversationId) : null
-  const isGroupChat = conversation?.kind === 'GROUP'
-  const isDM = isConversation && !isGroupChat
+  const isDM = room.startsWith('conversation:')
 
   // snapshot the read stamp at room entry so the NEW divider stays put
   const [unreadAfter, setUnreadAfter] = useState<number | null>(null)
@@ -997,12 +1231,24 @@ export function MessageList({ room }: { room: string }) {
     [messages, unreadAfter]
   )
 
-  const server = servers.find((s) => s.id === activeServerId)
-  const canPin = isConversation || (server ? (server.myPerms & (PERM.ADMINISTRATOR | PERM.MANAGE_MESSAGES)) !== 0 : false)
-  const canDeleteAny = isConversation ? false : (server ? (server.myPerms & (PERM.ADMINISTRATOR | PERM.MANAGE_MESSAGES)) !== 0 : false)
+  // only the newest call row carries the live join chip: older rows are
+  // history, not doors
+  const lastCallRowId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].systemKind === 'call') return messages[i].id
+    }
+    return null
+  }, [messages])
 
-  // DM: single "seen" under the last message of mine they read
-  const otherRead = isDM && conversationId ? otherReadAt[conversationId] : null
+  const server = servers.find((s) => s.id === activeServerId)
+  const canPin = isDM || (server ? (server.myPerms & (PERM.ADMINISTRATOR | PERM.MANAGE_MESSAGES)) !== 0 : false)
+  const canDeleteAny = isDM ? false : (server ? (server.myPerms & (PERM.ADMINISTRATOR | PERM.MANAGE_MESSAGES)) !== 0 : false)
+
+  // read receipt: "seen" rides under THE LAST MESSAGE OF MINE THEY READ,
+  // not my newest one — so it keeps marking the same row even after I keep
+  // typing, and slides forward only when they actually catch up
+  const conversationId = isDM ? room.slice('conversation:'.length) : null
+  const otherRead = conversationId ? otherReadAt[conversationId] : null
   const lastReadMessageId = useMemo(() => {
     if (!isDM || !otherRead || !me) return null
     const t = new Date(otherRead).getTime()
@@ -1014,28 +1260,67 @@ export function MessageList({ room }: { room: string }) {
     return null
   }, [messages, me, otherRead, isDM])
 
-  // group: readers whose lastReadAt has reached this message, shown as pfps
-  const groupReadersByMessage = useMemo(() => {
-    if (!isGroupChat || !conversationId || !me || !conversation?.participants) return {} as Record<string, typeof conversation.participants>
-    const stamps = groupReadAt[conversationId] ?? {}
-    const out: Record<string, NonNullable<typeof conversation.participants>> = {}
-    for (const p of conversation.participants) {
-      if (p.id === me.id) continue
-      const stamp = stamps[p.id]
-      if (!stamp) continue
+  // group read receipts: per reader, the LAST of my messages their stamp
+  // covers (the per-reader version of lastReadMessageId above), grouped
+  // under that message — earliest reader first. DM receipts keep the plain
+  // Check above; unknown conversations fall back to the DM path too
+  const conversation = conversationId ? conversations.find((c) => c.id === conversationId) : undefined
+  const isGroupConv = conversation?.kind === 'GROUP'
+  const groupReceipts = useMemo(() => {
+    if (!isGroupConv || !me || !groupReadStamps) return null
+    const byMessage = new Map<string, { userId: string; at: number }[]>()
+    for (const [userId, stamp] of Object.entries(groupReadStamps)) {
+      if (userId === me.id) continue
       const t = new Date(stamp).getTime()
+      if (!Number.isFinite(t)) continue
+      let covered: string | null = null
       for (let i = messages.length - 1; i >= 0; i--) {
         const m = messages[i]
         if (m.authorId !== me.id) continue
         if (new Date(m.createdAt).getTime() <= t) {
-          if (!out[m.id]) out[m.id] = []
-          out[m.id].push(p)
+          covered = m.id
           break
         }
       }
+      if (!covered) continue
+      const list = byMessage.get(covered) ?? []
+      list.push({ userId, at: t })
+      byMessage.set(covered, list)
     }
-    return out
-  }, [isGroupChat, conversationId, me, conversation?.participants, groupReadAt, messages])
+    for (const list of byMessage.values()) list.sort((a, b) => a.at - b.at)
+    return byMessage
+  }, [isGroupConv, me, groupReadStamps, messages])
+
+  // channel read receipts (friends only): same shape as the group map —
+  // per friend, the last of MY channel messages their read stamp covers;
+  // grouped under that message. The stamp set is already friends-only on
+  // both ends (server seeds friends who are members; live updates filter
+  // to friends in onChannelRead), so no extra filtering happens here.
+  const isChannel = room.startsWith('channel:')
+  const channelReceipts = useMemo(() => {
+    if (!isChannel || !me || !channelFriendStamps) return null
+    const byMessage = new Map<string, { userId: string; at: number }[]>()
+    for (const [userId, stamp] of Object.entries(channelFriendStamps)) {
+      if (userId === me.id) continue
+      const t = new Date(stamp).getTime()
+      if (!Number.isFinite(t)) continue
+      let covered: string | null = null
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]
+        if (m.authorId !== me.id) continue
+        if (new Date(m.createdAt).getTime() <= t) {
+          covered = m.id
+          break
+        }
+      }
+      if (!covered) continue
+      const list = byMessage.get(covered) ?? []
+      list.push({ userId, at: t })
+      byMessage.set(covered, list)
+    }
+    for (const list of byMessage.values()) list.sort((a, b) => a.at - b.at)
+    return byMessage
+  }, [isChannel, me, channelFriendStamps, messages])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -1044,8 +1329,49 @@ export function MessageList({ room }: { room: string }) {
   const prevHeightRef = useRef(0)
   const missedWhileAwayRef = useRef(0)
   const prevRoomRef = useRef<string | null>(null)
+  // while this timestamp is in the future, scroll events belong to the app
+  // (jump glide, room swap, history-prepend compensation), not the user —
+  // the return pill must survive its own jump
+  const progScrollUntilRef = useRef(0)
+  // a return-pill click into a swapped history window: the exact scrollTop
+  // to land on once the newest page is restored
+  const pendingReturnTopRef = useRef<number | null>(null)
+  // long-press on a message row opens its context menu on touch screens
+  // (Android fires contextmenu natively; iOS needs the manual timer)
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const clearLongPress = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current)
+      longPressRef.current = null
+    }
+  }
+  const onRowTouchStart = (msg: ClientMessage) => (e: React.TouchEvent) => {
+    // touches born on interactive children (reactions, links, embeds,
+    // the toolbar itself) belong to those children, not the row gesture
+    const target = e.target as HTMLElement
+    if (target.closest('button, a, input, textarea, [role="button"], img, video')) return
+    const t = e.touches[0]
+    const x = t.clientX
+    const y = t.clientY
+    clearLongPress()
+    longPressRef.current = setTimeout(() => {
+      longPressRef.current = null
+      if (msg.pending || msg.failed || msg.systemKind) return
+      // a tiny buzz sells the long-press on phones that support it
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(12)
+        } catch {
+          // vibration is a courtesy, never a requirement
+        }
+      }
+      openRowMenu(msg, { x, y })
+    }, 460)
+  }
 
   const [lightbox, setLightbox] = useState<{ url: string; author: string } | null>(null)
+  // lightbox downloads ride the same iframe-safe helper as the attachment chips
+  const safeDownload = useSafeDownload()
   // device-pixel snap for the lightbox media: runs on load and after each
   // contain <-> fill toggle (the 150ms transition must settle first)
   const lightboxImgRef = useRef<HTMLImageElement | null>(null)
@@ -1126,11 +1452,83 @@ export function MessageList({ room }: { room: string }) {
     if (!el) return
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight
     stickToBottom.current = distance < 120
+    // the honest read gate consults this. a permalink window parked on
+    // history is never "at the newest messages", even when its own bottom
+    // edge is on screen. the action no-ops when the value is unchanged, so
+    // scroll spam never re-renders
+    setRoomAtBottom(room, stickToBottom.current && !roomState?.hasNewer)
     setShowJump(distance > 300)
+    // the return pill dies once the viewer wanders far from the captured
+    // spot on their own. two comparisons, no layout reads — cheap enough
+    // for every scroll tick; app-driven scrolls are excluded via the guard
+    // timestamp so the jump itself never kills its own pill
+    if (
+      returnPoint &&
+      returnPoint.room === room &&
+      Date.now() > progScrollUntilRef.current &&
+      Math.abs(el.scrollTop - returnPoint.scrollTop) > 600
+    ) {
+      clearReturnPoint()
+    }
     if (el.scrollTop < 500 && roomState?.loaded && roomState.hasMore && !roomState.loadingMore) {
       void loadOlder(room)
     }
   }
+
+  // bottom-parking report for the honest read gate: sync on room change and
+  // whenever the permalink-window state flips (the pane remounts per room;
+  // the room-switch layout effect lands on the newest message before
+  // passive effects run, so the ref already holds the fresh value). every
+  // later flip flows through handleScroll above
+  useEffect(() => {
+    setRoomAtBottom(room, stickToBottom.current && !roomState?.hasNewer)
+  }, [room, roomState?.hasNewer, setRoomAtBottom])
+
+  /** remember where the viewer stands before a reply/permalink jump, so
+   *  the floating return pill can bring them back. only meaningful jumps
+   *  count (parked deep in the list, not at the top), and a chain of jumps
+   *  keeps the FIRST departure point of this room — discord-style */
+  const captureReturnPoint = useCallback(() => {
+    const el = scrollRef.current
+    if (!el || el.scrollTop <= 400) return
+    const cur = useChatStore.getState().returnPoint
+    if (cur?.room === room) return
+    setReturnPoint(room, el.scrollTop)
+  }, [room, setReturnPoint])
+
+  /** the return pill (and escape): glide back to the captured spot and
+   *  spend the point. when the jump swapped the list to a history window,
+   *  restore the newest page first and land on the captured spot after */
+  const performReturn = useCallback(() => {
+    const rp = useChatStore.getState().returnPoint
+    if (!rp || rp.room !== room) return
+    clearReturnPoint()
+    sounds.play('lightTick')
+    const el = scrollRef.current
+    if (!el) return
+    if (roomState?.hasNewer) {
+      pendingReturnTopRef.current = rp.scrollTop
+      requestPresent(room)
+    } else {
+      el.scrollTo({ top: rp.scrollTop, behavior: 'smooth' })
+    }
+  }, [room, roomState?.hasNewer, clearReturnPoint, requestPresent])
+
+  // escape works like the pill while it is in view; menus, dialogs and
+  // text inputs keep their own escape behavior
+  useEffect(() => {
+    if (!returnPoint || returnPoint.room !== room) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const t = e.target as HTMLElement | null
+      if (t?.closest('input, textarea, [contenteditable="true"], [role="menu"]')) return
+      if (document.querySelector('[role="menu"], [role="dialog"][data-state="open"]')) return
+      e.preventDefault()
+      performReturn()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [returnPoint, room, performReturn])
 
   // short first page (viewport taller than the content): the scroll event
   // never fires, so the first auto-load has to be kicked off directly
@@ -1150,6 +1548,7 @@ export function MessageList({ room }: { room: string }) {
     if (room !== prevRoomRef.current) {
       // room switch: land on the newest message and re-arm the follow behavior
       prevRoomRef.current = room
+      progScrollUntilRef.current = Date.now() + 1600
       el.scrollTop = el.scrollHeight
       stickToBottom.current = true
       missedWhileAwayRef.current = 0
@@ -1175,6 +1574,7 @@ export function MessageList({ room }: { room: string }) {
     if (!el) return
     if (roomState?.loadingMore) return
     if (el.scrollHeight > prevHeightRef.current && !stickToBottom.current) {
+      progScrollUntilRef.current = Date.now() + 400
       el.scrollTop += el.scrollHeight - prevHeightRef.current
     }
     prevHeightRef.current = el.scrollHeight
@@ -1212,16 +1612,20 @@ export function MessageList({ room }: { room: string }) {
     const el = document.querySelector(`[data-mid="${jumpTarget.messageId}"]`)
     if (!el) return // not rendered yet: the messages dep retries this
     jumpHandledAtRef.current = jumpTarget.at
+    progScrollUntilRef.current = Date.now() + 1600
     el.scrollIntoView({ block: 'center', behavior: 'smooth' })
     el.classList.add('flash-highlight')
     setTimeout(() => el.classList.remove('flash-highlight'), 2400)
   }, [jumpTarget?.at, room, messages])
 
   // return-to-present: after a permalink window swap, land at the bottom
+  // (or at the return pill's captured spot when the pill drove the swap)
   useEffect(() => {
     if (!presentRequest || presentRequest.room !== room) return
     const el = scrollRef.current
-    if (el) el.scrollTo({ top: el.scrollHeight })
+    const top = pendingReturnTopRef.current
+    pendingReturnTopRef.current = null
+    if (el) el.scrollTo({ top: top ?? el.scrollHeight })
     missedWhileAwayRef.current = 0
   }, [presentRequest?.at, room])
 
@@ -1256,6 +1660,16 @@ export function MessageList({ room }: { room: string }) {
   }
 
   /** The full message menu: right-click on a row, or the toolbar kebab. */
+  // the newest message row keeps its quick-action toolbar pinned open on
+  // touch screens (hover never happens there): long-press covers the rest
+  const lastRowId = (() => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e2 = entries[i]
+      if (e2.kind === 'message' && !e2.msg.pending && !e2.msg.failed && !e2.msg.systemKind) return e2.msg.id
+    }
+    return null
+  })()
+
   function openRowMenu(msg: ClientMessage, at: { x: number; y: number }) {
     const fakeEvent = {
       preventDefault: () => {},
@@ -1280,7 +1694,7 @@ export function MessageList({ room }: { room: string }) {
         { kind: 'item', label: 'reply in thread', icon: MessagesSquare, onSelect: () => void openThread(msg.id) },
         { kind: 'item', label: 'forward', icon: Forward, onSelect: () => setForwardTarget(msg) },
         ...(msg.content
-          ? [{ kind: 'item' as const, label: 'translate', icon: Languages, onSelect: () => void translateMessage(msg.id, msg.content ?? '') }] : []),
+          ? [{ kind: 'item' as const, label: 'translate', icon: Languages, rainbow: true, onSelect: () => void translateMessage(msg.id, msg.content ?? '') }] : []),
         ...(msg.content
           ? [{ kind: 'item' as const, label: 'copy text', icon: Copy, onSelect: () => copyMessage(msg) }] : []),
         { kind: 'item', label: 'copy link', icon: Link2, onSelect: () => copyMessageLink(msg) },
@@ -1442,6 +1856,7 @@ export function MessageList({ room }: { room: string }) {
                   entry.msg.failed && 'msg-failed',
                   blockedUserIds[entry.msg.authorId] && !revealedBlocked[entry.msg.id] && 'opacity-60'
                 )}
+                data-last={entry.msg.id === lastRowId || undefined}
                 onContextMenu={(e) => {
                   // always kill the native browser menu on message rows, even
                   // for pending/system rows where we show nothing instead
@@ -1450,8 +1865,14 @@ export function MessageList({ room }: { room: string }) {
                   if (entry.msg.systemKind) return
                   openRowMenu(entry.msg, { x: e.clientX, y: e.clientY })
                 }}
+                onTouchStart={onRowTouchStart(entry.msg)}
+                onTouchMove={clearLongPress}
+                onTouchEnd={clearLongPress}
+                onTouchCancel={clearLongPress}
               >
-                {entry.msg.systemKind ? (
+                {entry.msg.systemKind === 'call' ? (
+                  <CallSystemRow msg={entry.msg} room={room} isLastCallRow={entry.msg.id === lastCallRowId} />
+                ) : entry.msg.systemKind ? (
                   <div className="w-full flex items-center justify-center gap-1.5 py-1 select-none system-row">
                     {entry.msg.systemKind === 'pin' ? (
                       <Pin className="size-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
@@ -1514,12 +1935,14 @@ export function MessageList({ room }: { room: string }) {
                         openProfile={openProfile}
                         editing={editingId === entry.msg.id}
                         editDraft={editDraft}
-                        setEditDraft={setEditDraft}
                         setEditingId={setEditingId}
                         editMessage={editMessage}
                         room={room}
                         setLightbox={openLightbox}
-                        onPermalink={(messageId) => void jumpToMessage(messageId)}
+                        onPermalink={(messageId) => {
+                          captureReturnPoint()
+                          void jumpToMessage(messageId)
+                        }}
                         savedGifUrls={savedGifUrls}
                         onSaveGif={(url, author) => void toggleSavedGif(url, `gif from ${author}`)}
                         isBookmarked={bookmarkedIds.has(entry.msg.id)}
@@ -1549,6 +1972,7 @@ export function MessageList({ room }: { room: string }) {
                         color={entry.msg.author.avatarColor}
                         url={entry.msg.author.avatarUrl}
                         size="md"
+                        className="avatar-hover cursor-pointer"
                         onClick={(e) =>
                           setMiniProfile({
                             username: entry.msg.author.username,
@@ -1587,7 +2011,9 @@ export function MessageList({ room }: { room: string }) {
                         onJump={() => {
                           // deep history covered: jumpToMessage resolves the
                           // room and loads a window around the target when the
-                          // original is not in the current page
+                          // original is not in the current page. remember
+                          // where we stand so the return pill can bring us back
+                          captureReturnPoint()
                           if (entry.msg.replyTo) void jumpToMessage(entry.msg.replyTo.id)
                         }}
                       />
@@ -1607,13 +2033,15 @@ export function MessageList({ room }: { room: string }) {
                         openProfile={openProfile}
                         editing={editingId === entry.msg.id}
                         editDraft={editDraft}
-                        setEditDraft={setEditDraft}
                         setEditingId={setEditingId}
                         editMessage={editMessage}
                         room={room}
                         setLightbox={openLightbox}
                         translation={translations[entry.msg.id]}
-                        onPermalink={(messageId) => void jumpToMessage(messageId)}
+                        onPermalink={(messageId) => {
+                          captureReturnPoint()
+                          void jumpToMessage(messageId)
+                        }}
                         savedGifUrls={savedGifUrls}
                         onSaveGif={(url, author) => void toggleSavedGif(url, `gif from ${author}`)}
                         isBookmarked={bookmarkedIds.has(entry.msg.id)}
@@ -1670,25 +2098,38 @@ export function MessageList({ room }: { room: string }) {
                         </div>
                       )}
 
-                      {isDM && lastReadMessageId === entry.msg.id && (
+                      {/* read receipts. DMs (and conversations whose kind we
+                          do not know yet): the plain check under the last
+                          message of mine the partner read. groups: the row
+                          of reader avatars under the last message of mine
+                          each reader covered — same footer slot, richer
+                          answer to "who saw this" */}
+                      {isDM && !isGroupConv && lastReadMessageId === entry.msg.id && (
                         <div className="flex items-center gap-1 mt-1 text-[10px] text-hyper" aria-live="polite">
                           <Check className="size-3" />
                           seen
                         </div>
                       )}
-                      {isGroupChat && (groupReadersByMessage[entry.msg.id]?.length ?? 0) > 0 && (
-                        <div className="flex items-center gap-0.5 mt-1.5" aria-label="seen by">
-                          {groupReadersByMessage[entry.msg.id].slice(0, 6).map((p) => (
-                            <span key={p.id} className="rounded-full ring-2 ring-app-chat" title={p.displayName || p.username}>
-                              <Avatar name={p.username} color={p.avatarColor} url={p.avatarUrl} size="sm" />
-                            </span>
-                          ))}
-                          {(groupReadersByMessage[entry.msg.id].length ?? 0) > 6 && (
-                            <span className="text-[10px] text-muted-foreground ml-1">
-                              +{groupReadersByMessage[entry.msg.id].length - 6}
-                            </span>
-                          )}
-                        </div>
+                      {isGroupConv && (
+                        <GroupReadReceipt
+                          readers={groupReceipts?.get(entry.msg.id) ?? null}
+                          participants={conversation?.participants ?? []}
+                        />
+                      )}
+                      {/* channel receipts: the same avatar-row receipt for
+                          MY channel messages, counting friends only —
+                          reader faces resolve from the server member list */}
+                      {isChannel && (
+                        <GroupReadReceipt
+                          readers={channelReceipts?.get(entry.msg.id) ?? null}
+                          participants={(serverMembers ?? []).map((m) => ({
+                            id: m.id,
+                            username: m.username,
+                            displayName: m.displayName,
+                            avatarUrl: m.avatarUrl,
+                            avatarColor: m.avatarColor,
+                          }))}
+                        />
                       )}
                     </div>
                   </>
@@ -1729,6 +2170,24 @@ export function MessageList({ room }: { room: string }) {
         >
           <ArrowDown className="size-3.5" />
           jump to present
+        </button>
+      )}
+
+      {/* reply-jump return pill: glide back to where the viewer stood
+          before the last reply/permalink jump (escape works too). rides
+          above the "jump to present" pill when both are up */}
+      {returnPoint?.room === room && (
+        <button
+          onClick={performReturn}
+          className={cn(
+            'absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3.5 h-9 rounded-full bg-app-raise/95 backdrop-blur-sm border border-white/15 text-xs font-semibold shadow-lg hover:border-hyper/60 hover:text-hyper transition-colors z-10',
+            roomState?.hasNewer ? 'bottom-16' : 'bottom-4'
+          )}
+          aria-label="back to where you were"
+          title="back to where you were (esc)"
+        >
+          <ArrowDown className="size-3.5" />
+          back to where you were
         </button>
       )}
 
@@ -1783,7 +2242,7 @@ export function MessageList({ room }: { room: string }) {
         >
           <DialogTitle className="sr-only">Image sent by {lightbox?.author}</DialogTitle>
           {lightbox && (
-            <div className="relative grid h-full w-full place-items-center group/lightbox">
+            <div className="relative grid h-full w-full place-items-center group/lightbox zoom-blur-in">
               {/* the media box shrink-wraps the image: the close X rides the
                   media's OWN top-right corner, not the window's. Clicking the
                   media toggles centered <-> fill-the-screen. */}
@@ -1826,7 +2285,7 @@ export function MessageList({ room }: { room: string }) {
                 {isGifUrl(lightbox.url) && (
                   <button
                     onClick={() => void toggleSavedGif(lightbox.url, `gif from ${lightbox.author}`)}
-                    className="flex h-9 items-center gap-1.5 rounded-sm border border-white/15 bg-black/60 px-3 text-xs font-semibold text-foreground/90 opacity-0 transition-all hover:border-white/40 focus-visible:opacity-100 group-hover/lightbox:opacity-100"
+                    className="flex h-9 items-center gap-1.5 rounded-sm border border-white/15 bg-black/60 px-3 text-xs font-semibold text-foreground/90 opacity-0 max-md:opacity-100 transition-all hover:border-white/40 focus-visible:opacity-100 group-hover/lightbox:opacity-100"
                     aria-label={savedGifUrls.has(lightbox.url) ? 'Remove GIF from your collection' : 'Save GIF to your collection'}
                     title={savedGifUrls.has(lightbox.url) ? 'unsave gif' : 'save gif'}
                   >
@@ -1838,16 +2297,19 @@ export function MessageList({ room }: { room: string }) {
                     {savedGifUrls.has(lightbox.url) ? 'unsave gif' : 'save gif'}
                   </button>
                 )}
-                <a
-                  href={lightbox.url}
-                  download
-                  className="flex h-9 items-center gap-1.5 rounded-sm border border-white/15 bg-black/60 px-3 text-xs font-semibold text-foreground/90 opacity-0 transition-all hover:border-white/40 focus-visible:opacity-100 group-hover/lightbox:opacity-100"
+                <button
+                  type="button"
+                  onClick={() => {
+                    const name = lightbox.url.split('/').pop()?.split('?')[0] || 'download'
+                    void safeDownload(lightbox.url, name)
+                  }}
+                  className="flex h-9 items-center gap-1.5 rounded-sm border border-white/15 bg-black/60 px-3 text-xs font-semibold text-foreground/90 opacity-0 max-md:opacity-100 transition-all hover:border-white/40 focus-visible:opacity-100 group-hover/lightbox:opacity-100"
                   aria-label="download image"
                   title="download image"
                 >
                   <Download className="size-3.5" />
                   download
-                </a>
+                </button>
               </div>
             </div>
           )}

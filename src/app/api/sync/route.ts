@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { fetchOnlineUserIds, fetchPresenceSnapshot, serverError, unauthorized } from '@/lib/realtime'
+import { fetchLiveCalls, fetchOnlineUserIds, fetchPresenceSnapshot, serverError, unauthorized } from '@/lib/realtime'
 
 const EPOCH = new Date(0)
 
@@ -109,6 +109,32 @@ export async function GET(req: NextRequest) {
       },
     })
 
+    // group read receipts: every OTHER participant's stamp per conversation.
+    // One findMany covers all conversation scopes, then the rows group by
+    // conversation — filtered to CURRENT other participants so a departed
+    // member's stale read row never shows up as a reader.
+    const othersReadByConv = new Map<string, Record<string, string>>()
+    const otherMemberIds = new Map<string, Set<string>>()
+    for (const p of participations) {
+      othersReadByConv.set(p.conversationId, {})
+      otherMemberIds.set(
+        p.conversationId,
+        new Set(p.conversation.participants.map((pt) => pt.userId))
+      )
+    }
+    const convScopes = [...othersReadByConv.keys()].map((id) => `conversation:${id}`)
+    const othersReadRows = convScopes.length
+      ? await db.readState.findMany({
+          where: { scopeKey: { in: convScopes }, userId: { not: me.id } },
+        })
+      : []
+    for (const r of othersReadRows) {
+      const conversationId = r.scopeKey.slice('conversation:'.length)
+      const entry = othersReadByConv.get(conversationId)
+      if (!entry || !otherMemberIds.get(conversationId)?.has(r.userId)) continue
+      entry[r.userId] = r.lastReadAt.toISOString()
+    }
+
     const conversationStamps = await Promise.all(
       participations.map(async (p) => {
         const conversationId = p.conversationId
@@ -129,6 +155,7 @@ export async function GET(req: NextRequest) {
           lastMessageId: last?.id ?? null,
           lastMessageAt: last ? last.createdAt.toISOString() : null,
           otherLastReadAt: otherRead ? otherRead.lastReadAt.toISOString() : null,
+          othersReadAt: othersReadByConv.get(conversationId) ?? {},
           hidden: p.hidden,
           unreadCount,
         }
@@ -153,11 +180,19 @@ export async function GET(req: NextRequest) {
       db.muteState.findMany({ where: { userId: me.id }, select: { scopeKey: true } }),
     ])
 
+    // live calls in my conversations, straight from the realtime service
+    // (a page loaded mid-call shows the join affordances immediately). Call
+    // ROOMS ride synthetic space ids (`convId~room`): they hydrate too when
+    // the conversation they hang off is mine
+    const myConversationIds = participations.map((p) => p.conversationId)
+    const liveCalls = await fetchLiveCalls(myConversationIds)
+
     return NextResponse.json({
       onlineUserIds,
       presenceStatuses: presence.statuses,
       awaySince: presence.awaySince,
       lastSeen: presence.lastSeen,
+      liveCalls,
       serverStamps,
       conversationStamps,
       channelUnread,

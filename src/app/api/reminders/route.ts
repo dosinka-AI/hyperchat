@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { badRequest, notFound, serverError, unauthorized } from '@/lib/realtime'
+import { canReadMessage } from '@/lib/messages'
+import { badRequest, forbidden, notFound, serverError, unauthorized } from '@/lib/realtime'
 
 /** "Remind me about this message": a personal nudge that fires as a toast +
  *  jump link at the chosen time. Pending reminders survive reloads; ones the
@@ -59,8 +60,17 @@ export async function POST(req: NextRequest) {
     const remindAtRaw = typeof body.remindAt === 'string' ? body.remindAt : ''
     if (!messageId) return badRequest('Which message?')
 
-    const message = await db.message.findUnique({ where: { id: messageId }, select: { id: true } })
+    const message = await db.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, channelId: true, conversationId: true, whisperTargetId: true, authorId: true },
+    })
     if (!message) return notFound('That message no longer exists.')
+    // a reminder must point at a message the caller can actually read: a
+    // swapped id must never smuggle a foreign preview out through the
+    // caller's own reminder list
+    if (!(await canReadMessage(me.id, message))) {
+      return forbidden('You cannot set a reminder on that message.')
+    }
 
     const remindAt = new Date(remindAtRaw)
     if (Number.isNaN(remindAt.getTime())) return badRequest('Pick a valid time.')

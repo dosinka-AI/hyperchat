@@ -1,0 +1,15 @@
+# Domain-mode port override for quickstart.sh: swaps the quick-HTTP port
+# for real 80/443 so the bundled caddy can obtain a Let's Encrypt
+# certificate for SITE_ADDRESS (automatic HTTPS, enables voice calls).
+#
+# Loaded only with both files, e.g. what quickstart.sh runs for
+# `./deploy/quickstart.sh alpha.example.com`:
+#   docker compose -f docker-compose.yml -f deploy/compose.domain.yml up -d --build
+#
+# Requires docker compose v2.24+ for the !override tag (any current docker).
+services:
+  app:
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"

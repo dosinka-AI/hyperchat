@@ -17,6 +17,7 @@ export type SessionUser = {
   avatarColor: string
   bio: string
   role: string
+  siteAdmin: boolean
   createdAt: Date
 }
 
@@ -86,10 +87,16 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       bannerUrl: true,
       bannedUntil: true,
       banReason: true,
+      siteAdmin: true,
+      siteBan: { select: { userId: true } },
       createdAt: true,
     },
   })
   if (!user) return null
+
+  // site ban (Task 6-c UserBan): a row existing at all kills the session
+  // everywhere — login also 403s and the sidecar handshake refuses a socket
+  if (user.siteBan) return null
 
   // site-level suspension gate: a future bannedUntil kills the session on the
   // spot; an expired one is lazily cleared so the account is active again

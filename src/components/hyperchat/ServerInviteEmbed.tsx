@@ -52,7 +52,7 @@ function resolveInvite(code: string): CacheEntry {
 }
 
 /** Compact server preview rendered under message text containing
- *  hyperchat.gg/<code>. */
+ *  hyperion.gg/<code> (legacy hyperchat.gg links still resolve). */
 export function ServerInviteEmbed({ code }: { code: string }) {
   const servers = useChatStore((s) => s.servers)
   const selectServer = useChatStore((s) => s.selectServer)

@@ -1,0 +1,4 @@
+{
+  "_comment": "HYPERION bootstrap config — where clients look for this server's address. The setup writes this into .env (BOOTSTRAP_URL). If you ever want a different anchor file, change it in the manager: settings → change the link.",
+  "bootstrapUrl": "https://raw.githubusercontent.com/dosinka-AI/hyperchat/refs/heads/main/server.txt"
+}

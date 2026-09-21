@@ -1,7 +1,7 @@
 {
-  "name": "HyperChat",
-  "short_name": "HyperChat",
-  "description": "HyperChat is a real-time group chat service with servers, roles, channels, direct messages, read receipts, reactions and image sharing. A Blazar Software\u2122 NRC product.",
+  "name": "Hyperion",
+  "short_name": "Hyperion",
+  "description": "Hyperion is a real-time group chat service with servers, roles, channels, direct messages, read receipts, reactions and image sharing.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

@@ -1,0 +1,493 @@
+#!/bin/bash
+# ─────────────────────────────────────────────────────────────────────────────
+# HYPERION — the server manager (TUI)
+#
+# This is the ONE command you need. Run it, pick numbers from the menu.
+#   ./hyperion            (or: bash hyperion)
+#
+# First time? It notices you're not installed yet and offers to install.
+# ─────────────────────────────────────────────────────────────────────────────
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+cd "$HERE"
+
+# setup.sh may have installed bun (and the tunnel) into ./bin — its PATH
+# export died with the install process, so make them callable in THIS
+# terminal too. without this, "start" dies instantly with
+# "bun: command not found" on boxes that have no system-wide bun.
+[ -d "$HERE/bin" ] && export PATH="$HERE/bin:$PATH"
+
+# ── pretty ───────────────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; CYAN=$'\033[36m'; RESET=$'\033[0m'
+else
+  BOLD=''; DIM=''; GREEN=''; YELLOW=''; RED=''; CYAN=''; RESET=''
+fi
+line() { printf '%s───%s\n' "$DIM" "$RESET"; }
+title() { printf '\n%s%s%s\n' "$BOLD" "$1" "$RESET"; }
+ok() { printf ' %s✔%s %s\n' "$GREEN" "$RESET" "$1"; }
+warn() { printf ' %s!%s %s\n' "$YELLOW" "$RESET" "$1"; }
+bad() { printf ' %s✖%s %s\n' "$RED" "$RESET" "$1"; }
+
+APP_PORT="${APP_PORT:-3000}"
+RUN_DIR="$HERE/run"
+LOG_DIR="$HERE/logs"
+APP_PID_FILE="$RUN_DIR/app.pid"
+SIDE_PID_FILE="$RUN_DIR/sidecar.pid"
+TUNNEL_PID_FILE="$RUN_DIR/tunnel.pid"
+APP_LOG="$LOG_DIR/app.log"
+SIDE_LOG="$LOG_DIR/sidecar.log"
+TUNNEL_LOG="$LOG_DIR/tunnel.log"
+BACKUP_DIR="$HERE/backups"
+ENV_FILE="$HERE/.env"
+INSTALLED_FLAG="$HERE/.installed"
+CF_BIN="$HERE/bin/cloudflared"
+
+installed() { [ -f "$INSTALLED_FLAG" ]; }
+app_pid() { [ -f "$APP_PID_FILE" ] && cat "$APP_PID_FILE" 2>/dev/null || echo ''; }
+side_pid() { [ -f "$SIDE_PID_FILE" ] && cat "$SIDE_PID_FILE" 2>/dev/null || echo ''; }
+tunnel_pid() { [ -f "$TUNNEL_PID_FILE" ] && cat "$TUNNEL_PID_FILE" 2>/dev/null || echo ''; }
+pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+
+is_running() {
+  local ap sp
+  ap="$(app_pid)"; sp="$(side_pid)"
+  pid_alive "$ap" && pid_alive "$sp"
+}
+
+# read a setting from .env (KEY=VALUE lines)
+env_get() { grep -m1 "^$1=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo ''; }
+
+# this machine's wifi/lan ip (best-effort, several fallbacks)
+lan_ip() {
+  local ip1
+  ip1="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+  if [ -n "$ip1" ]; then echo "$ip1"; return; fi
+  hostname -I 2>/dev/null | awk '{print $1}'
+}
+
+# the current public tunnel address, parsed from cloudflared's log
+tunnel_url() {
+  grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | tail -1
+}
+
+have_cloudflared() { command -v cloudflared >/dev/null 2>&1 || [ -x "$CF_BIN" ]; }
+cf_cmd() {
+  if command -v cloudflared >/dev/null 2>&1; then command -v cloudflared; else echo "$CF_BIN"; fi
+}
+
+# ── health checks ─────────────────────────────────────────────────────────────
+# NEVER depend on curl: plenty of minimal boxes ship without it, and a
+# missing curl makes a HEALTHY server look dead — command-not-found reads
+# as “not answering”, which is exactly the false alarm that can eat an
+# evening. bun is always there (the server itself runs on it), so bun
+# checks first; curl is only a long-shot fallback for weird setups.
+http_ok() { # $1 = url → exit 0 when it answers with anything under 500
+  if command -v bun >/dev/null 2>&1; then
+    bun -e 'fetch(process.argv[1],{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))' "$1" >/dev/null 2>&1
+  else
+    curl -s -m 5 -o /dev/null "$1" 2>/dev/null
+  fi
+}
+
+port_open() { # $1 = tcp port → exit 0 when something listens on it
+  if command -v bun >/dev/null 2>&1; then
+    bun -e 'const n=require("node:net");const s=n.connect(Number(process.argv[1]),"127.0.0.1");const t=setTimeout(()=>process.exit(1),2500);s.on("connect",()=>{clearTimeout(t);s.destroy();process.exit(0)});s.on("error",()=>process.exit(1))' "$1" >/dev/null 2>&1
+  else
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+  fi
+}
+
+# ── menu actions ─────────────────────────────────────────────────────────────
+
+do_install() {
+  if installed; then ok "already installed — nothing to do."; return 0; fi
+  bash "$HERE/setup.sh" || bad "install failed — read the messages above."
+}
+
+do_start() {
+  if ! installed; then bad "not installed yet — run option 1 first."; return 1; fi
+  if is_running; then ok "already running (option 3 shows details)."; return 0; fi
+  # pre-flight: everything start needs, each with its plain-english fix
+  if ! command -v bun >/dev/null 2>&1; then
+    bad "bun (the runtime) is not callable"
+    printf '   %sfix: bash setup.sh   (it installs bun into ./bin — no root needed)%s\n' "$DIM" "$RESET"
+    return 1
+  fi
+  if [ ! -f "$HERE/.next/standalone/server.js" ]; then
+    bad "the built server is missing (.next/standalone/server.js)"
+    printf '   %sfix: bash setup.sh   (rebuilds it — a few minutes)%s\n' "$DIM" "$RESET"
+    return 1
+  fi
+  if [ ! -f "$ENV_FILE" ]; then
+    bad ".env is missing (the database location + secrets)"
+    printf '   %sfix: bash setup.sh   (regenerates it, keeps nothing back)%s\n' "$DIM" "$RESET"
+    return 1
+  fi
+  # zip drift: unzipping a NEWER zip over this folder changes app files, and
+  # the built server would then be stale. setup.sh stamps the fingerprint of
+  # the last build into .build-done — a mismatch means: rebuild first,
+  # automatically (secrets + database are never touched by a rebuild).
+  local built='' current=''
+  built="$(cat "$HERE/.build-done" 2>/dev/null || true)"
+  current="$(bash "$HERE/setup.sh" --print-build-stamp 2>/dev/null || true)"
+  if [ -n "$current" ] && [ "$built" != "$current" ]; then
+    warn "the app files changed since the last build (a newer zip?) — rebuilding first"
+    printf '   %sa few quiet minutes. your accounts + database are never touched.%s\n' "$DIM" "$RESET"
+    if ! bash "$HERE/setup.sh"; then
+      bad "rebuild failed — read the messages above (option 4 has the logs)."
+      return 1
+    fi
+  fi
+  mkdir -p "$RUN_DIR" "$LOG_DIR"
+  # .env is loaded by the processes themselves via `set -a; source`
+  (
+    cd "$HERE"
+    set -a; . "$ENV_FILE"; set +a
+    # sidecar first: the app connects to it
+    nohup bun mini-services/chat-service/index.ts > "$SIDE_LOG" 2>&1 &
+    echo $! > "$SIDE_PID_FILE"
+    sleep 1
+    # HOSTNAME=0.0.0.0 is pinned ON PURPOSE: the built server binds to
+    # $HOSTNAME whenever a shell exports it (many boxes export the machine's
+    # name), and the page then answers on no address you would ever try.
+    # all-interfaces = localhost + wifi + tunnel, all working.
+    HOSTNAME=0.0.0.0 PORT="$APP_PORT" NODE_ENV=production \
+      nohup bun .next/standalone/server.js > "$APP_LOG" 2>&1 &
+    echo $! > "$APP_PID_FILE"
+  )
+  # wait for the app to answer — bail out EARLY if a process dies, and
+  # show the actual error lines right here instead of sending you digging
+  local i=0 ap sp lan
+  while [ $i -lt 60 ]; do
+    if http_ok "http://127.0.0.1:${APP_PORT}"; then
+      ok "server is UP"
+      printf '   %son this machine:  http://127.0.0.1:%s%s\n' "$CYAN" "$APP_PORT" "$RESET"
+      lan="$(lan_ip)"
+      [ -n "$lan" ] && printf '   %son your wifi/lan: http://%s:%s%s\n' "$CYAN" "$lan" "$APP_PORT" "$RESET"
+      printf '   %sopen it in a browser and register — the FIRST account made%s\n' "$DIM" "$RESET"
+      printf '   %sbecomes the site admin automatically.%s\n' "$DIM" "$RESET"
+      printf '   %s(option 7 shares it over the internet when you are ready)%s\n' "$DIM" "$RESET"
+      # pop the page open right now — best-effort, never an error
+      if command -v defaultbrowser >/dev/null 2>&1; then
+        ( defaultbrowser "http://127.0.0.1:${APP_PORT}" >/dev/null 2>&1 & )
+      elif command -v xdg-open >/dev/null 2>&1; then
+        ( xdg-open "http://127.0.0.1:${APP_PORT}" >/dev/null 2>&1 & )
+      fi
+      return 0
+    fi
+    ap="$(app_pid)"; sp="$(side_pid)"
+    if ! pid_alive "$ap" || ! pid_alive "$sp"; then
+      rm -f "$APP_PID_FILE" "$SIDE_PID_FILE" 2>/dev/null
+      bad "a process died at startup — the last log lines:"
+      printf '\n%s── realtime service log (last 12) ──%s\n' "$DIM" "$RESET"
+      tail -n 12 "$SIDE_LOG" 2>/dev/null | sed 's/^/  /'
+      printf '%s── web app log (last 12) ──%s\n' "$DIM" "$RESET"
+      tail -n 12 "$APP_LOG" 2>/dev/null | sed 's/^/  /'
+      printf '\n   %sfull logs: option 4. a fresh bash setup.sh fixes most causes.%s\n' "$DIM" "$RESET"
+      return 1
+    fi
+    sleep 1; i=$((i+1))
+  done
+  bad "started, but the web page did not answer in 60 seconds."
+  printf '\n%s── web app log (last 15) ──%s\n' "$DIM" "$RESET"
+  tail -n 15 "$APP_LOG" 2>/dev/null | sed 's/^/  /'
+  printf '%s── realtime service log (last 15) ──%s\n' "$DIM" "$RESET"
+  tail -n 15 "$SIDE_LOG" 2>/dev/null | sed 's/^/  /'
+  printf '\n%s── what this box is listening on ──%s\n' "$DIM" "$RESET"
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -tln 2>/dev/null | grep -E "(:${APP_PORT}|:3003)" | sed 's/^/  /' \
+      || printf '  nothing is listening on port %s or 3003\n' "$APP_PORT"
+  elif command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | grep -E "(:${APP_PORT}|:3003)" | sed 's/^/  /' \
+      || printf '  nothing is listening on port %s or 3003\n' "$APP_PORT"
+  else
+    printf '  (netstat/ss not on this box — option 4 logs are the source of truth)\n'
+  fi
+  printf '\n   %smost causes: a port already in use, or a crash on boot — the log%s\n' "$DIM" "$RESET"
+  printf '   %slines above show which one it is. full logs: option 4.%s\n' "$DIM" "$RESET"
+}
+
+do_stop() {
+  if ! is_running; then ok "not running."; else
+    local ap sp
+    ap="$(app_pid)"; sp="$(side_pid)"
+    pid_alive "$ap" && kill "$ap" 2>/dev/null && ok "stopped the web app (pid $ap)"
+    pid_alive "$sp" && kill "$sp" 2>/dev/null && ok "stopped the realtime service (pid $sp)"
+    rm -f "$APP_PID_FILE" "$SIDE_PID_FILE" 2>/dev/null
+  fi
+  # the tunnel points at this server — stop it too so nobody holds a dead link
+  local tp
+  tp="$(tunnel_pid)"
+  if pid_alive "$tp"; then
+    kill "$tp" 2>/dev/null
+    rm -f "$TUNNEL_PID_FILE" 2>/dev/null
+    warn "tunnel stopped too — its old address is dead now"
+    printf '   %s(start a new one after boot: option 7, then update your github txt)%s\n' "$DIM" "$RESET"
+  fi
+  # pidfiles can vanish (a crash, a reboot, a killed terminal): sweep by
+  # command line too, so nothing keeps holding the ports behind your back
+  if command -v pkill >/dev/null 2>&1; then
+    local swept=0
+    pkill -f "standalone/server\.js" 2>/dev/null && swept=1
+    pkill -f "mini-services/chat-service" 2>/dev/null && swept=1
+    [ $swept -eq 1 ] && warn "swept leftover server processes no pidfile knew about"
+  fi
+}
+
+do_status() {
+  title "status"
+  local ap sp lan
+  ap="$(app_pid)"; sp="$(side_pid)"
+  if is_running; then
+    ok "running"
+    printf '   web app:      pid %s → http://127.0.0.1:%s\n' "$ap" "$APP_PORT"
+    printf '   realtime:     pid %s (port 3003)\n' "$sp"
+    if http_ok "http://127.0.0.1:${APP_PORT}"; then ok "web page answers"; else warn "web page not answering yet"; fi
+    if port_open 3003; then ok "realtime service answers on 3003"; else warn "realtime not answering on 3003 (chat needs it)"; fi
+    lan="$(lan_ip)"
+    [ -n "$lan" ] && printf '   same wifi:    %shttp://%s:%s%s\n' "$CYAN" "$lan" "$APP_PORT" "$RESET"
+  else
+    bad "not running"
+    printf '   %stry: option 1 (start) — option 4 (logs) if it will not stay up%s\n' "$DIM" "$RESET"
+  fi
+  # tunnel line
+  local tp url
+  tp="$(tunnel_pid)"
+  if pid_alive "$tp"; then
+    url="$(tunnel_url)"
+    if [ -n "$url" ]; then
+      ok "tunnel: running → $url"
+      printf '   %s(this is what you paste into the server.txt on github)%s\n' "$DIM" "$RESET"
+    else
+      warn "tunnel: starting (no address yet — give it a moment)"
+    fi
+  else
+    printf '   tunnel:       %soff (option 7 shares the server over the internet)%s\n' "$DIM" "$RESET"
+  fi
+}
+
+do_logs() {
+  title "logs (Ctrl+C to stop watching)"
+  local which
+  printf ' 1) web app   2) realtime   3) tunnel   4) just show the last lines\n > '
+  read -r which
+  case "$which" in
+    1) [ -f "$APP_LOG" ] && tail -f "$APP_LOG" || bad "no app log yet" ;;
+    2) [ -f "$SIDE_LOG" ] && tail -f "$SIDE_LOG" || bad "no sidecar log yet" ;;
+    3) [ -f "$TUNNEL_LOG" ] && tail -f "$TUNNEL_LOG" || bad "no tunnel log yet (option 7 starts one)" ;;
+    4) tail -n 30 "$APP_LOG" "$SIDE_LOG" 2>/dev/null || warn "no logs yet" ;;
+    *) bad "pick 1, 2, 3 or 4" ;;
+  esac
+}
+
+do_backup() {
+  if [ ! -f "$HERE/db/custom.db" ]; then bad "no database found — is it installed?"; return 1; fi
+  mkdir -p "$BACKUP_DIR"
+  local stamp dest
+  stamp="$(date '+%Y-%m-%d_%H-%M-%S')"
+  dest="$BACKUP_DIR/hyperion-$stamp"
+  if is_running; then
+    warn "server is running — backing up live (safe, but stopping first is cleanest)"
+  fi
+  mkdir -p "$dest"
+  cp "$HERE/db/custom.db" "$dest/" 2>/dev/null
+  [ -f "$HERE/db/custom.db-wal" ] && cp "$HERE/db/custom.db-wal" "$dest/" 2>/dev/null
+  [ -f "$HERE/db/custom.db-shm" ] && cp "$HERE/db/custom.db-shm" "$dest/" 2>/dev/null
+  [ -d "$HERE/db/vault" ] && cp -r "$HERE/db/vault" "$dest/" 2>/dev/null
+  ok "backup saved: $dest"
+  printf '   %s(%s old backups kept, oldest trimmed)%s\n' "$DIM" "${KEEP:-14}" "$RESET"
+  # keep the newest 14
+  ls -1dt "$BACKUP_DIR"/hyperion-* 2>/dev/null | tail -n +15 | xargs -r rm -rf
+}
+
+do_restore() {
+  local latest
+  latest="$(ls -1dt "$BACKUP_DIR"/hyperion-* 2>/dev/null | head -1)"
+  if [ -z "$latest" ]; then bad "no backups found in $BACKUP_DIR"; return 1; fi
+  title "restore"
+  warn "this OVERWRITES the current database with: $latest"
+  printf '  type RESTORE to confirm (anything else cancels)\n > '
+  local answer; read -r answer
+  [ "$answer" = "RESTORE" ] || { ok "cancelled."; return 0; }
+  if is_running; then do_stop; fi
+  cp "$latest/custom.db" "$HERE/db/custom.db" 2>/dev/null || { bad "restore failed"; return 1; }
+  for f in custom.db-wal custom.db-shm; do
+    [ -f "$latest/$f" ] && cp "$latest/$f" "$HERE/db/" 2>/dev/null
+    [ ! -f "$latest/$f" ] && rm -f "$HERE/db/$f" 2>/dev/null
+  done
+  if [ -d "$latest/vault" ]; then rm -rf "$HERE/db/vault"; cp -r "$latest/vault" "$HERE/db/"; fi
+  ok "database restored from $(basename "$latest")"
+}
+
+do_tunnel_stop() {
+  local tp
+  tp="$(tunnel_pid)"
+  if pid_alive "$tp"; then
+    kill "$tp" 2>/dev/null
+    rm -f "$TUNNEL_PID_FILE" 2>/dev/null
+    ok "tunnel stopped — the old public address is dead now"
+    printf '   %sanyone still holding it gets nothing until you start a new%s\n' "$DIM" "$RESET"
+    printf '   %stunnel + paste the new address into your github server.txt.%s\n' "$DIM" "$RESET"
+  else
+    ok "tunnel was not running."
+  fi
+}
+
+do_tunnel_start() {
+  if ! have_cloudflared; then
+    bad "cloudflared (the tunnel program) is not on this machine"
+    printf '  1) download it now (~50 MB, no root needed)   2) back\n > '
+    local what; read -r what
+    [ "$what" = "1" ] || return 0
+    local arch cf_url
+    arch="$(uname -m)"
+    case "$arch" in
+      x86_64)  cf_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" ;;
+      aarch64) cf_url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64" ;;
+      *) bad "unsupported cpu type: $arch"; return 1 ;;
+    esac
+    mkdir -p "$HERE/bin"
+    printf '  downloading…\n'
+    if curl -fL "$cf_url" -o "$CF_BIN" 2>/dev/null; then
+      chmod +x "$CF_BIN"
+      ok "cloudflared installed at: $CF_BIN"
+    else
+      rm -f "$CF_BIN" 2>/dev/null
+      bad "download failed — check the internet, or download it yourself from:"
+      printf '     %s\n' "$cf_url"
+      return 1
+    fi
+  fi
+  if ! is_running; then
+    warn "the server is not running — start it first (option 1) or the"
+    printf '   %stunnel will show an error page to anyone who opens it.%s\n' "$DIM" "$RESET"
+    printf '  start the tunnel anyway? (y/N)\n > '
+    local sure; read -r sure
+    case "$sure" in y|Y|yes|YES) ;; *) ok "cancelled."; return 0 ;; esac
+  fi
+  mkdir -p "$RUN_DIR" "$LOG_DIR"
+  nohup "$(cf_cmd)" tunnel --url "http://127.0.0.1:${APP_PORT}" --no-autoupdate > "$TUNNEL_LOG" 2>&1 &
+  echo $! > "$TUNNEL_PID_FILE"
+  # wait for the address to show up in the log
+  local i=0 url=''
+  printf '  starting the tunnel'
+  while [ $i -lt 40 ]; do
+    url="$(tunnel_url)"
+    [ -n "$url" ] && break
+    printf '.'; sleep 1; i=$((i+1))
+  done
+  printf '\n'
+  if [ -n "$url" ]; then
+    printf '\n'
+    line
+    printf '  %syour server is now reachable from anywhere:%s\n' "$BOLD" "$RESET"
+    printf '\n     %s%s%s\n\n' "$GREEN$BOLD" "$url" "$RESET"
+    line
+    printf '  %s→ next:%s paste that address into the server.txt on github%s\n' "$BOLD" "$RESET"
+    printf '  %s(the first line = the address). every hyperion client reads%s\n' "$DIM" "$RESET"
+    printf '  %sthat txt and follows it — you never reinstall anything.%s\n' "$DIM" "$RESET"
+    printf '  %sheads-up: the address CHANGES every tunnel restart — after%s\n' "$DIM" "$RESET"
+    printf '  %srebooting this machine, run option 7 again + re-paste.%s\n' "$DIM" "$RESET"
+    printf '\n  %stunnel log: %s%s\n' "$DIM" "$TUNNEL_LOG" "$RESET"
+  else
+    bad "tunnel started, but no address appeared in 40s"
+    printf '   %scheck the log (option 4 → tunnel) or: %s%s\n' "$DIM" "$TUNNEL_LOG" "$RESET"
+  fi
+}
+
+do_tunnel() {
+  title "tunnel — share this server over the internet"
+  local tp url
+  tp="$(tunnel_pid)"
+  if pid_alive "$tp"; then
+    url="$(tunnel_url)"
+    ok "tunnel is running"
+    printf '   %spublic address:%s %s%s%s\n' "$DIM" "$RESET" "$GREEN" "${url:-(still starting…)}" "$RESET"
+    printf '\n   %sthat is what belongs in the server.txt on github.%s\n' "$DIM" "$RESET"
+    printf '\n  1) restart it (gets a NEW address)   2) stop the tunnel   3) back\n > '
+    local what; read -r what
+    case "$what" in
+      1) do_tunnel_stop; do_tunnel_start ;;
+      2) do_tunnel_stop ;;
+      *) : ;;
+    esac
+  else
+    printf '  the tunnel gives this server a temporary https address that\n'
+    printf '  works for anyone on the internet — no router setup, no domain.\n'
+    printf '  %sit changes every restart: you paste the new one into the%s\n' "$DIM" "$RESET"
+    printf '  %sserver.txt on github by hand, and every client follows.%s\n\n' "$DIM" "$RESET"
+    printf '  1) start the tunnel   2) back\n > '
+    local what; read -r what
+    case "$what" in
+      1) do_tunnel_start ;;
+      *) : ;;
+    esac
+  fi
+}
+
+do_help() {
+  title "how this works"
+  cat <<'HELP'
+  your server is a normal website + a realtime service:
+    . the WEB APP   serves the chat on a port (default 3000)
+    . the REALTIME  service carries live voice/typing/presence
+    . the DATABASE  is one file: db/custom.db (+ db/vault for files)
+
+  how people find you:
+    . same wifi:    they open http://<this-machine>:3000 directly
+    . internet:    option 7 (tunnel) prints a temporary https
+                   address — you paste it into the server.txt you
+                   keep on github, BY HAND, as the first line.
+    . clients:     every hyperion client reads that txt to find
+                   your server. the txt is yours — this server
+                   never reads it and never needs it. when the
+                   tunnel address changes, paste the new one and
+                   every client follows. nothing gets reinstalled.
+
+  the FIRST account registered on a fresh install becomes the
+  site admin (the admin panel in the account menu).
+
+  everyday:  ./hyperion  → 1 start · 2 stop · 3 status · 5 backup
+  (option 1 also rebuilds by itself when a newer zip changed the app)
+  after a reboot:  1 (start) · 7 (tunnel) · paste the new address
+HELP
+}
+
+# ── the menu ─────────────────────────────────────────────────────────────────
+while true; do
+  printf '\n'
+  printf '%s╔══════════════════════════════════════╗%s\n' "$CYAN" "$RESET"
+  printf '%s║   HYPERION  ·  server manager        ║%s\n' "$CYAN" "$RESET"
+  printf '%s╚══════════════════════════════════════╝%s\n' "$CYAN" "$RESET"
+  if installed; then
+    if is_running; then printf ' %s● running%s\n' "$GREEN" "$RESET"; else printf ' %s○ stopped%s\n' "$DIM" "$RESET"; fi
+  else
+    printf ' %s◆ not installed yet — option 1 installs everything%s\n' "$YELLOW" "$RESET"
+  fi
+  printf '\n'
+  printf '  1) %s  2) %s  3) %s\n' \
+    "$(installed && echo 'start the server' || echo 'install (first time)')" \
+    'stop the server' 'status'
+  printf '  4) %s   5) %s   6) %s\n' 'view logs' 'backup the database' 'restore a backup'
+  printf '  7) %s  8) %s  0) %s\n' 'tunnel (share online)' 'how this works' 'exit'
+  printf '\n > '
+  read -r choice || { printf '\n'; exit 0; }
+  case "$choice" in
+    1) if installed; then
+         is_running || do_start
+       else
+         do_install && installed && ! is_running && do_start
+       fi ;;
+    2) do_stop ;;
+    3) do_status ;;
+    4) do_logs ;;
+    5) do_backup ;;
+    6) do_restore ;;
+    7) do_tunnel ;;
+    8) do_help ;;
+    0|q|quit|exit) ok "bye — the server keeps running if it was running."; exit 0 ;;
+    *) warn "pick a number from the menu" ;;
+  esac
+done

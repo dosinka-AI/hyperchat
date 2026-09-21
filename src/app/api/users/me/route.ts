@@ -52,7 +52,7 @@ export async function PATCH(req: NextRequest) {
       } else if (FILE_URL_RE.test(url)) {
         data.avatarUrl = url
       } else {
-        return badRequest('Use an image uploaded through HyperChat.')
+        return badRequest('Use an image uploaded through Hyperion.')
       }
     }
     if (body.avatarColor !== undefined && typeof body.avatarColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(body.avatarColor)) {
@@ -79,7 +79,7 @@ export async function PATCH(req: NextRequest) {
       } else if (FILE_URL_RE.test(url)) {
         data.bannerUrl = url
       } else {
-        return badRequest('Use a banner uploaded through HyperChat.')
+        return badRequest('Use a banner uploaded through Hyperion.')
       }
     }
     if (body.bannerColor !== undefined) {
@@ -105,6 +105,7 @@ export async function PATCH(req: NextRequest) {
         avatarColor: true,
         bio: true,
         role: true,
+        siteAdmin: true,
         customStatus: true,
         pronouns: true,
         presence: true,

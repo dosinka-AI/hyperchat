@@ -6,7 +6,7 @@ import { sounds } from './sounds'
 import { useChatStore } from './store'
 import { releaseYouTubeEmbed, trackYouTubeEmbed, youTubeTimeOf } from './yt-registry'
 import { ServerInviteEmbed } from '@/components/hyperchat/ServerInviteEmbed'
-import { UrlVideoEmbed, YouTubeControlsBar, HideEmbedButton } from '@/components/hyperchat/MediaSurface'
+import { UrlVideoEmbed, HideEmbedButton } from '@/components/hyperchat/MediaSurface'
 import { isBlanked, subscribeBlanked, toggleBlanked } from './media-blank'
 import { lookupServerEmoji } from './serverEmoji'
 import { hasFlags, splitFlagText } from './flags'
@@ -163,12 +163,12 @@ export function permalinkTarget(href: string): string | null {
 const INLINE_RE = new RegExp(
   [
     // bold+italic first so *** is not half-eaten by the bold/italic rules
-    String.raw`\*\*\*(?<boldItalic>(?:[^*\n]|\*(?!\*\*))+?)\*\*\*`,
-    // bold before italic; body may contain single * for nested italic
-    String.raw`\*\*(?<bold>(?:[^*\n]|\*(?!\*))+?)\*\*`,
-    String.raw`__(?<underline>(?:[^_\n]|_(?!_))+?)__`,
-    String.raw`\*(?<italic>(?:[^*\n]|\*\*[^*]+?\*\*)+?)\*`,
-    String.raw`~~(?<strike>(?:[^~\n]|~(?!~))+?)~~`,
+    String.raw`\*\*\*(?<boldItalic>[^*\n]+)\*\*\*`,
+    // bold before italic so ** is not half-eaten by the single-star rule
+    String.raw`\*\*(?<bold>[^*\n]+)\*\*`,
+    String.raw`__(?<underline>[^_\n]+)__`,
+    String.raw`\*(?<italic>[^*\n]+)\*`,
+    String.raw`~~(?<strike>[^~\n]+)~~`,
     "`(?<code>[^`\\n]+)`",
     String.raw`\|\|(?<spoiler>[^|\n]+)\|\|`,
     // rich text: [c=#hex]...[/c] color and [s=px]...[/s] size. colored
@@ -178,9 +178,10 @@ const INLINE_RE = new RegExp(
     String.raw`(?<link>https?:\/\/[^\s]+)`,
     String.raw`(?<mentionRaw>@[a-z0-9_]{3,20})`,
     String.raw`(?<emojiRaw>:[a-z0-9_]{2,32}:)`,
-    // the marker: a standalone ??? run (word-bounded) carries the
-    // full-spectrum gradient
-    String.raw`(?<![\w?])\?\?\?(?![\w?])`,
+    // the marker: only the ZWSP-sentineled ??? (swapped in from :fniger:
+    // on send) carries the full-spectrum gradient. a plain ??? the user
+    // typed renders as ordinary text
+    String.raw`\u200B\?\?\?`,
   ].join('|'),
   'g'
 )
@@ -201,11 +202,11 @@ function safeSize(raw: string): number | null {
   return Math.max(10, Math.min(28, n))
 }
 
-/** Shareable server invite token: hyperchat.gg/<code>. The optional
- *  leading whitespace is consumed by the match and stitched back into
- *  the surrounding text. */
-const INVITE_RE = /(?:^|\s)hyperchat\.gg\/([a-zA-Z0-9]{6,16})/g
-const INVITE_PREFIX_LEN = 'hyperchat.gg/'.length
+/** Shareable server invite token: hyperion.gg/<code> (the legacy
+ *  hyperchat.gg/<code> form still renders, so pre-rebrand messages keep
+ *  their cards). The optional leading whitespace is consumed by the match
+ *  and stitched back into the surrounding text. */
+const INVITE_RE = /(?:^|\s)(hyperion|hyperchat)\.gg\/([a-zA-Z0-9]{6,16})/g
 
 /** Extract @username mentions from a message body. */
 export function extractMentions(content: string): string[] {
@@ -468,7 +469,7 @@ function YouTubeEmbed({ id }: { id: string }) {
     return (
       <div className="mt-1.5 max-w-md rounded-sm border border-white/10 bg-app-raise px-3 py-2.5 flex items-center gap-2.5">
         <EyeOff className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">video hidden - you chose not to see it</span>
+        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">video hidden (you chose not to see it)</span>
         <button
           type="button"
           onClick={(e) => {
@@ -492,7 +493,7 @@ function YouTubeEmbed({ id }: { id: string }) {
         <div className="relative aspect-video">
           <iframe
             ref={iframeRef}
-            src={`https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&controls=0&modestbranding=1&start=${youTubeTimeOf(id)}&enablejsapi=1`}
+            src={`https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&controls=1&start=${youTubeTimeOf(id)}&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`}
             allow="autoplay; encrypted-media; picture-in-picture"
             allowFullScreen
             title="video"
@@ -514,10 +515,8 @@ function YouTubeEmbed({ id }: { id: string }) {
           </button>
           <HideEmbedButton url={`yt:${id}`} blanked={blanked} className="top-1.5 right-[4.6rem]" />
         </div>
-        {/* the compact chrome: play/pause, seek, time, volume, pop-out -
-            the iframe itself runs controls=0 so YouTube's default UI never
-            shows next to HyperChat's */}
-        <YouTubeControlsBar videoId={id} iframeRef={iframeRef} />
+        {/* YouTube's own playbar runs inside the iframe (controls=1): no
+            custom Hyperion bar rides under it */}
       </div>
     )
   }
@@ -586,7 +585,7 @@ function YouTubeEmbed({ id }: { id: string }) {
         }}
         className="absolute top-1.5 right-[4.6rem] z-10 grid place-items-center size-6 rounded-sm bg-black/70 text-white/70 hover:text-white hover:bg-black transition-[color,background-color,opacity] opacity-0 group-hover/embed:opacity-100 focus-visible:opacity-100"
         aria-label="Hide video"
-        title="hide - keep the message, lose the visuals"
+        title="hide (keep the message, lose the visuals)"
       >
         <EyeOff className="size-3" />
       </span>
@@ -595,7 +594,7 @@ function YouTubeEmbed({ id }: { id: string }) {
 }
 
 /** Standalone media url -> YouTube card or the custom inline video player
- *  (file videos play in the message with HyperChat chrome, never the
+ *  (file videos play in the message with Hyperion chrome, never the
  *  browser default). */
 function MediaEmbed({ url }: { url: string }) {
   const yt = youtubeId(url)
@@ -648,8 +647,9 @@ function renderInline(line: string, opts: MentionOptions, depth = 0): ReactNode 
           {renderInline(g.boldItalic, opts, depth + 1)}
         </strong>
       )
-    } else if (full === '???') {
-      // the marker: the dense full-spectrum gradient treatment
+    } else if (full === '\u200B???') {
+      // the marker: the dense full-spectrum gradient treatment (the
+      // leading ZWSP is stripped from the rendered text so copies are clean)
       nodes.push(
         <span key={key++} className="rainbow-marker" aria-label="???">
           ???
@@ -658,25 +658,25 @@ function renderInline(line: string, opts: MentionOptions, depth = 0): ReactNode 
     } else if (g.bold) {
       nodes.push(
         <strong key={key++} className="font-bold text-white">
-          {depth < 4 ? renderInline(g.bold, opts, depth + 1) : g.bold}
+          {g.bold}
         </strong>
       )
     } else if (g.underline) {
       nodes.push(
         <u key={key++} className="underline decoration-foreground/60 underline-offset-2">
-          {depth < 4 ? renderInline(g.underline, opts, depth + 1) : g.underline}
+          {g.underline}
         </u>
       )
     } else if (g.italic) {
       nodes.push(
         <em key={key++} className="italic">
-          {depth < 4 ? renderInline(g.italic, opts, depth + 1) : g.italic}
+          {g.italic}
         </em>
       )
     } else if (g.strike) {
       nodes.push(
         <s key={key++} className="opacity-70">
-          {depth < 4 ? renderInline(g.strike, opts, depth + 1) : g.strike}
+          {g.strike}
         </s>
       )
     } else if (g.code) {
@@ -793,7 +793,7 @@ function renderInline(line: string, opts: MentionOptions, depth = 0): ReactNode 
   return nodes
 }
 
-/** A line carrying hyperchat.gg/<code> tokens: the surrounding text
+/** A line carrying hyperion.gg/<code> tokens: the surrounding text
  *  stays intact and each token becomes a block-level invite card. */
 function renderLineWithInvites(line: string, opts: MentionOptions): ReactNode | null {
   const matches = Array.from(line.matchAll(INVITE_RE))
@@ -803,13 +803,15 @@ function renderLineWithInvites(line: string, opts: MentionOptions): ReactNode | 
   let last = 0
   let key = 0
   for (const match of matches) {
-    const code = match[1]
-    const tokenStart = (match.index ?? 0) + match[0].length - INVITE_PREFIX_LEN - code.length
+    const code = match[2]
+    // domain length + the slash; depends on which domain matched
+    const prefixLen = match[1].length + 1
+    const tokenStart = (match.index ?? 0) + match[0].length - prefixLen - code.length
     if (tokenStart > last) {
       parts.push(<Fragment key={`t${key++}`}>{renderInline(line.slice(last, tokenStart), opts)}</Fragment>)
     }
     parts.push(<ServerInviteEmbed key={`i${key++}`} code={code} />)
-    last = tokenStart + INVITE_PREFIX_LEN + code.length
+    last = tokenStart + prefixLen + code.length
   }
   if (last < line.length) {
     parts.push(<Fragment key={`t${key++}`}>{renderInline(line.slice(last), opts)}</Fragment>)
@@ -818,7 +820,7 @@ function renderLineWithInvites(line: string, opts: MentionOptions): ReactNode | 
 }
 
 /** Render a chat message body: code blocks, quotes, bold, italic, strike,
- *  inline code, links, spoilers, @mentions, hyperchat.gg server invite
+ *  inline code, links, spoilers, @mentions, hyperion.gg server invite
  *  cards and standalone video embeds (YouTube click-to-load, direct video
  *  files). Deliberately small: chat markup, not a full document engine. */
 export function renderMessageContent(content: string, opts: MentionOptions = {}): ReactNode {
@@ -872,7 +874,7 @@ export function renderMessageContent(content: string, opts: MentionOptions = {})
       const line = lines[idx]
 
       // Discord-style headings: "# text" (one to three hashes) renders as
-      // a big bold display line anywhere - dms, gcs, servers alike
+      // a big bold display line anywhere — dms, gcs, servers alike
       const heading = /^(#{1,3})\s+(.+)$/.exec(line)
       if (heading) {
         flushQuote()

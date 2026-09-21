@@ -3,7 +3,7 @@ import { hash, compare } from 'bcryptjs'
 import { db } from '@/lib/db'
 import { EMAIL_RE } from '@/lib/auth'
 
-/** Email infrastructure for HyperChat.
+/** Email infrastructure for Hyperion.
  *
  *  Anti-fake-email policy: an address is only accepted if its domain can
  *  actually receive mail — we resolve the domain's MX records over real DNS

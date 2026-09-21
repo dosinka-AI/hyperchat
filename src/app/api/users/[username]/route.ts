@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     })
     if (!user) return notFound('No user goes by that name.')
 
-    // mutual servers: shared membership with icons for the profile card
+    // mutual servers: shared membership names for the profile card
     const myServers = await db.serverMember.findMany({
       where: { userId: me.id },
       select: { serverId: true },
@@ -41,15 +41,12 @@ export async function GET(_req: NextRequest, { params }: Params) {
             id: { in: myServers.map((m) => m.serverId) },
             members: { some: { userId: user.id } },
           },
-          select: { id: true, name: true, iconUrl: true },
-          take: 8,
+          select: { name: true },
+          take: 6,
         })
       : []
 
-    return NextResponse.json({
-      user,
-      mutualServers: mutual.map((m) => ({ id: m.id, name: m.name, iconUrl: m.iconUrl })),
-    })
+    return NextResponse.json({ user, mutualServers: mutual.map((m) => m.name) })
   } catch {
     return serverError()
   }

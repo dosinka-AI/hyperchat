@@ -24,7 +24,7 @@ import { Eye, EyeOff, Pause, PictureInPicture2, Play, Volume, VolumeX } from 'lu
  * The inline media surface: file videos, audio and voice messages play
  * INSIDE the message row with fully custom chrome (no native controls
  * anywhere). One <video> host element per source lives in a module registry
- * and is attached here while this surface is the visible one - playback
+ * and is attached here while this surface is the visible one — playback
  * never restarts when it moves between this embed, the floating player, or
  * the parking lot.
  *
@@ -104,7 +104,7 @@ function HostSurface({
 }
 
 /** Custom scrubber for host <video> sources: buffered + played bars, hover
- *  time bubble, drag to seek, arrow keys to nudge. No <input type=range> -
+ *  time bubble, drag to seek, arrow keys to nudge. No <input type=range> —
  *  this is chrome we own end to end. */
 function Scrubber({ mediaKey, state }: { mediaKey: string; state: MediaHostState }) {
   const trackRef = useRef<HTMLDivElement | null>(null)
@@ -214,7 +214,7 @@ function Scrubber({ mediaKey, state }: { mediaKey: string; state: MediaHostState
   )
 }
 
-/** Volume button + flyout slider, styled to HyperChat (thin 4px track,
+/** Volume button + flyout slider, styled to Hyperion (thin 4px track,
  *  hyper fill). Shared by every custom control bar. */
 function VolumeControl({
   volume,
@@ -464,7 +464,7 @@ function YouTubeScrubber({
 }
 
 /** Compact controls row for a playing YouTube embed (inline card or the
- *  floating player). play/pause, seek, time, volume, pop-out - all through
+ *  floating player). play/pause, seek, time, volume, pop-out — all through
  *  postMessage so the iframe itself stays chrome-free. */
 export function YouTubeControlsBar({
   videoId,
@@ -557,8 +557,8 @@ export function YouTubeControlsBar({
 }
 
 /** ---------------------------------------------------------------------------
- *  Waveforms: voice messages and audio files share one bar strip. Heights
- *  come from recorded voice levels or real decoded peaks for sound files,
+ *  Waveforms: voice messages and audio files share one bar strip — heights
+ *  from the attachment's waveform data (or a deterministic fingerprint),
  *  bars before the playhead in hyper, after in muted, and the bars around
  *  the playhead breathe while it plays. Click or drag to seek.
  * ------------------------------------------------------------------------- */
@@ -659,7 +659,7 @@ function WaveformBars({
 }
 
 /** Neutral placeholder for a blanked embed: nothing of the media renders
- *  (not even a poster frame) - just a quiet card. Click anywhere on it to
+ *  (not even a poster frame) — just a quiet card. Click anywhere on it to
  *  reveal again. */
 export function HiddenMediaCard({ url, kindLabel }: { url: string; kindLabel: string }) {
   return (
@@ -685,7 +685,7 @@ export function HiddenMediaCard({ url, kindLabel }: { url: string; kindLabel: st
     >
       <EyeOff className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
-        {`${kindLabel} hidden - click to reveal`}
+        {`${kindLabel} hidden: click to reveal`}
       </span>
       <Eye className="size-3.5 text-muted-foreground" aria-hidden="true" />
     </div>
@@ -723,7 +723,7 @@ export function HideEmbedButton({
         className ?? 'top-1.5 right-1.5'
       )}
       aria-label={blanked ? 'Reveal media' : 'Hide media'}
-      title={blanked ? 'reveal' : 'hide - keep the message, lose the visuals'}
+      title={blanked ? 'reveal' : 'hide (keep the message, lose the visuals)'}
     >
       {blanked ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
     </button>
@@ -776,10 +776,9 @@ export function FileMediaEmbed({
   const player = useChatStore((s) => s.mediaPlayer)
   const currentRoom = useCurrentRoom()
   // real peaks for every audio surface: recorded levels ride on voice
-  // attachments; plain sound files always decode the actual bytes (never a
-  // stored fingerprint or placeholder waveform)
+  // attachments, anything else decodes the actual file on mount
   const voiceBars = useRealWaveform(url, isVoice ? waveform : undefined, 36)
-  const audioBars = useRealWaveform(url, undefined, 40)
+  const audioBars = useRealWaveform(url, isVoice ? undefined : waveform, 40)
 
   const state = useMediaState(url, url)
   const active = player?.kind === 'file' && player.url === url
@@ -975,7 +974,7 @@ export function FileMediaEmbed({
   // ---- video: the frame in place + the little player ----
   if (popped) {
     // playback handed to the floating player: this surface waits. (a PAUSED
-    // pop-out auto-unpops - see MediaPlayer - so this card never lies about
+    // pop-out auto-unpops — see MediaPlayer — so this card never lies about
     // something playing)
     return (
       <div className="mt-1.5 max-w-md rounded-sm border border-white/10 bg-app-raise px-3 py-2.5 flex items-center gap-2.5">

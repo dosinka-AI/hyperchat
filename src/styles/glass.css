@@ -1,0 +1,294 @@
+/* ============================================================
+   HyperChat Liquid Glass design system
+   Apple's Liquid Glass material (WWDC 2025 / iOS 26) adapted to
+   HyperChat's OLED identity. Research + recipe sources:
+   .zscripts/liquid-glass-research.md
+
+   Layers:
+   1. .lg-aurora      fixed drifting backdrop the glass refracts
+   2. .lg-panel       structural glass columns (square, edge-to-edge)
+   3. .lg-float       floating glass chrome (dialogs, popovers, composer)
+   4. specular rims   1px light edges + inset highlights everywhere
+   5. overlays        restyled via [data-slot] selectors
+   Non-Chromium browsers fall back to classic glassmorphism
+   (blur + saturate, no displacement) automatically.
+   ============================================================ */
+
+:root {
+  /* concentric radius ladder: 16 -> 10 -> 7 for nested glass */
+  --lg-radius-float: 16px;
+  --lg-radius-inner: 10px;
+  --lg-radius-chip: 7px;
+
+  /* material tune (Regular variant: dark adaptive tint) */
+  --lg-tint: rgba(9, 9, 12, 0.34);
+  --lg-tint-strong: rgba(9, 9, 12, 0.58);
+  --lg-tint-clear: rgba(12, 12, 16, 0.30);
+  --lg-blur: 22px;
+  --lg-saturate: 1.6;
+  --lg-brightness: 1.08;
+
+  /* specular rim */
+  --lg-rim: rgba(255, 255, 255, 0.18);
+  --lg-rim-strong: rgba(255, 255, 255, 0.30);
+  --lg-edge-light: rgba(255, 255, 255, 0.12);
+}
+
+/* user preferences (set on <html data-glass="full|soft|off">) */
+[data-glass="soft"] {
+  --lg-blur: 30px;
+  --lg-tint: rgba(9, 9, 12, 0.62);
+  --lg-tint-strong: rgba(9, 9, 12, 0.78);
+}
+[data-glass="off"] {
+  --lg-blur: 0.01px;
+  --lg-tint: #060608;
+  --lg-tint-strong: #0a0a0c;
+  --lg-tint-clear: #0a0a0c;
+  --lg-rim: rgba(255, 255, 255, 0.08);
+  --lg-rim-strong: rgba(255, 255, 255, 0.12);
+}
+
+/* ---------- 1. Aurora backdrop -------------------------------- */
+
+.lg-aurora {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(160% 120% at 50% -20%, rgba(255, 255, 255, 0.08), transparent 55%),
+    radial-gradient(120% 100% at 50% 120%, rgba(84, 124, 255, 0.12), transparent 60%),
+    #000;
+}
+/* edge glows: horizontal light bleeding under the top chrome and up from
+   beneath the window, so the header strip and the composer always have
+   bright content behind them to refract (macOS Tahoe menu-bar trick) */
+.lg-glow-top {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 22vh;
+  background: linear-gradient(
+    to bottom,
+    rgba(150, 170, 220, 0.16),
+    rgba(150, 170, 220, 0.05) 45%,
+    transparent
+  );
+}
+.lg-glow-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30vh;
+  background: linear-gradient(
+    to top,
+    rgba(96, 130, 225, 0.20),
+    rgba(96, 130, 225, 0.07) 45%,
+    transparent
+  );
+}
+.lg-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(72px);
+  will-change: transform;
+  opacity: 0.9;
+}
+.lg-blob-a {
+  width: 46vw;
+  height: 46vw;
+  left: -12vw;
+  top: -16vw;
+  background: radial-gradient(circle at 35% 35%, rgba(170, 186, 230, 0.40), rgba(170, 186, 230, 0.13) 55%, transparent 72%);
+  animation: lg-drift-a 110s ease-in-out infinite alternate;
+}
+.lg-blob-b {
+  width: 38vw;
+  height: 38vw;
+  right: -10vw;
+  bottom: -12vw;
+  background: radial-gradient(circle at 60% 40%, rgba(84, 124, 255, 0.34), rgba(84, 124, 255, 0.11) 55%, transparent 72%);
+  animation: lg-drift-b 130s ease-in-out infinite alternate;
+}
+.lg-blob-c {
+  width: 26vw;
+  height: 26vw;
+  left: 34vw;
+  top: 38vh;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.06) 55%, transparent 70%);
+  animation: lg-drift-c 95s ease-in-out infinite alternate;
+}
+.lg-blob-d {
+  width: 22vw;
+  height: 22vw;
+  left: 6vw;
+  bottom: -8vw;
+  background: radial-gradient(circle at 45% 45%, rgba(120, 140, 190, 0.26), rgba(120, 140, 190, 0.08) 55%, transparent 70%);
+  animation: lg-drift-c 120s ease-in-out infinite alternate-reverse;
+}
+@keyframes lg-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(9vw, 7vh, 0) scale(1.12); }
+}
+@keyframes lg-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.05); }
+  to { transform: translate3d(-8vw, -6vh, 0) scale(0.94); }
+}
+@keyframes lg-drift-c {
+  from { transform: translate3d(-4vw, 0, 0); }
+  to { transform: translate3d(6vw, -5vh, 0); }
+}
+[data-aurora="off"] .lg-aurora {
+  background: #000;
+}
+[data-aurora="off"] .lg-blob {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg-blob { animation: none !important; }
+}
+
+/* ---------- 2 + 3. Glass surfaces ------------------------------ */
+
+/* structural column glass (edge-to-edge, square corners) */
+.lg-panel {
+  position: relative;
+  background: var(--lg-tint);
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+  box-shadow:
+    inset 0 1px 0 var(--lg-edge-light),
+    inset 0 0 0 1px var(--lg-rim),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* floating glass chrome (rounded, concentric with children) */
+.lg-float {
+  position: relative;
+  border-radius: var(--lg-radius-float);
+  background: var(--lg-tint-strong);
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+  border: 1px solid var(--lg-rim);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.06),
+    0 24px 60px -18px rgba(0, 0, 0, 0.7);
+}
+.lg-float:hover {
+  border-color: var(--lg-rim-strong);
+}
+
+/* clear variant: above media / momentary chrome */
+.lg-clear {
+  background: var(--lg-tint-clear);
+  border-color: rgba(255, 255, 255, 0.10);
+}
+
+/* small glass control (pills, chips, buttons that sit on glass) */
+.lg-chip {
+  border-radius: var(--lg-radius-chip);
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+.lg-chip:hover {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.lg-chip:active {
+  transform: scale(0.97);
+}
+
+/* glass divider */
+.lg-divider {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--lg-rim) 18%,
+    var(--lg-rim) 82%,
+    transparent
+  );
+}
+
+/* ---------- 4. Overlay surfaces via data-slot ------------------ */
+/* dialogs, popovers, menus: translucent popover var + glass treatment.
+   --popover is redefined to a translucent value so `bg-popover`
+   participates in the material. */
+
+:root {
+  --popover: rgba(14, 14, 17, 0.66);
+  --card: rgba(12, 12, 15, 0.60);
+}
+[data-glass="off"] {
+  --popover: #101011;
+  --card: #0a0a0a;
+}
+
+[data-slot="dialog-content"],
+[data-slot="popover-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="context-menu-content"],
+[data-slot="command-dialog-content"] {
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness)) !important;
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness)) !important;
+  border-color: var(--lg-rim) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 24px 60px -18px rgba(0, 0, 0, 0.75) !important;
+}
+[data-slot="dropdown-menu-content"],
+[data-slot="context-menu-content"] {
+  border-radius: var(--lg-radius-inner) !important;
+}
+[data-slot="dropdown-menu-item"],
+[data-slot="context-menu-item"] {
+  border-radius: calc(var(--lg-radius-chip) - 2px);
+}
+[data-slot="tooltip-content"] {
+  border-radius: var(--lg-radius-chip);
+  background: rgba(22, 22, 26, 0.92);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- 5. Composer + header chrome ------------------------ */
+
+.lg-composer {
+  border-radius: var(--lg-radius-float);
+  background: var(--lg-tint-strong);
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
+  border: 1px solid var(--lg-rim);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 12px 34px -12px rgba(0, 0, 0, 0.65);
+}
+.lg-composer:focus-within {
+  border-color: rgba(84, 124, 255, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 0 3px rgba(84, 124, 255, 0.14),
+    0 12px 34px -12px rgba(0, 0, 0, 0.65);
+}
+
+/* header strip glass */
+.lg-header {
+  background: var(--lg-tint);
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--lg-edge-light),
+    inset 0 -1px 0 var(--lg-rim);
+}
+
+/* focus sheen that follows the glass accent */
+.lg-focus:focus-visible {
+  outline: 2px solid rgba(84, 124, 255, 0.55);
+  outline-offset: 2px;
+}

@@ -1,0 +1,14 @@
+# HyperChat front door - plain HTTP mode (no SITE_ADDRESS domain set).
+# One public port (LISTEN_PORT): /socket.io/* goes to the realtime sidecar
+# (which speaks socket.io on path '/'), everything else to the Next.js app.
+# TLS is expected to be terminated upstream (a platform edge, or the host's
+# own proxy) when this flavor is in use.
+:{$LISTEN_PORT:3000}
+
+handle_path /socket.io/* {
+	reverse_proxy 127.0.0.1:3003
+}
+
+handle {
+	reverse_proxy 127.0.0.1:{$APP_PORT:3100}
+}

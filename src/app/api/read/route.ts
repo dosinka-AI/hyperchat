@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { badRequest, conversationRoom, emitToRooms, serverError, unauthorized } from '@/lib/realtime'
+import { badRequest, channelRoom, conversationRoom, emitToRooms, guestRoom, serverError, unauthorized } from '@/lib/realtime'
 
 const SCOPE_RE = /^(channel|conversation|post):[a-zA-Z0-9]+$/
 
@@ -53,6 +53,32 @@ export async function POST(req: NextRequest) {
     if (kind === 'conversation') {
       await emitToRooms([conversationRoom(id)], 'read:update', {
         conversationId: id,
+        userId: me.id,
+        lastReadAt: lastReadAt.toISOString(),
+      })
+      // cross-rung call guests see receipts for THEIR OWN messages too: the
+      // same stamp rides the guest room (their client only marks its own
+      // rows — members' messages are never visible to them)
+      const guestRows = await db.callGuest.findMany({
+        where: { conversationId: id, expiresAt: { gt: new Date() } },
+        select: { userId: true },
+      })
+      if (guestRows.length > 0) {
+        await emitToRooms([guestRoom(id)], 'read:update', {
+          conversationId: id,
+          userId: me.id,
+          lastReadAt: lastReadAt.toISOString(),
+        })
+      }
+    }
+
+    // channel read receipts (friends render them on the author's side): the
+    // reader's stamp rides the channel room so message authors watching the
+    // channel can show who caught up. Cheap by design — no per-message
+    // queries, it rides the exact flow DM receipts already use.
+    if (kind === 'channel') {
+      await emitToRooms([channelRoom(id)], 'channel:read', {
+        channelId: id,
         userId: me.id,
         lastReadAt: lastReadAt.toISOString(),
       })

@@ -17,8 +17,10 @@ function isRegional(cp: number): boolean {
  *  svg path, or null when the pair has no shipped glyph (fake flags stay
  *  as text so nothing renders broken). */
 export function flagSrc(pair: string): string | null {
-  if (pair.length !== 2) return null
+  // each regional indicator is an astral codepoint (2 UTF-16 units), so the
+  // pair check counts CODEPOINTS, never .length (a pair is 4 utf-16 units)
   const cps = Array.from(pair)
+  if (cps.length !== 2) return null
   const a = cps[0].codePointAt(0)!
   const b = cps[1].codePointAt(0)!
   if (!isRegional(a) || !isRegional(b)) return null

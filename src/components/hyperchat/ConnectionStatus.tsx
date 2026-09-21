@@ -101,7 +101,7 @@ export function ConnectionBanner() {
       role="alert"
     >
       <span className="size-1.5 rounded-full bg-destructive animate-pulse" aria-hidden="true" />
-      Connection interrupted. Reconnecting automatically. HyperChat keeps working and catches up when the line returns.
+      Connection interrupted. Reconnecting automatically. Hyperion keeps working and catches up when the line returns.
     </div>
   )
 }

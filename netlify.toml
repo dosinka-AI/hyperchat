@@ -4,20 +4,42 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # .env is gitignored, so it never ships inside the deploy zip - without
+  # this line the build dies at `bunx prisma db push` with
+  # "Environment variable not found: DATABASE_URL". Prisma resolves
+  # relative SQLite urls against the prisma/ directory, so this creates
+  # (and validates) prisma/db/custom.db on the build machine.
+  DATABASE_URL = "file:./db/custom.db"
 
-# HyperChat is a full Next.js app (App Router server + API routes).
-# Netlify's Next runtime serves the pages and the /api/* routes; the
-# realtime socket.io sidecar runs as a background service (see
-# mini-services/chat-service) and must be deployed alongside (Render,
-# Railway, Fly.io, or a Netlify function with a persistent process).
-# The app degrades gracefully without it: HTTP polling (/api/sync)
-# keeps messages flowing; calls and live presence need the sidecar.
-
-[[redirects]]
-  from = "/socket.io/*"
-  to = "http://localhost:3003/socket.io/:splat"
-  status = 200
-  force = false
+# ---------------------------------------------------------------------------
+# How HyperChat runs on Netlify
+#
+# The site builds and serves completely: every page and every /api route
+# works through the Next runtime. Two serverless realities differ from a
+# full host:
+#
+# 1. DATA: function instances have a read-only bundle, so the app stores
+#    its SQLite database and uploaded files in /tmp (src/lib/server-env.ts),
+#    bootstrapping the schema itself at cold start (src/lib/db-bootstrap.ts).
+#    Everything works - accounts, servers, chats, uploads - but /tmp resets
+#    whenever the instance recycles. Treat a Netlify deploy as a live
+#    preview/demo of the app, not as durable production storage.
+#
+# 2. REALTIME: typing, live presence and voice need the socket.io sidecar
+#    in mini-services/chat-service, which reads the SQLite file directly and
+#    therefore cannot run as a function. Without it the client keeps chats
+#    updating through /api/sync HTTP polling and the connection pill shows
+#    offline. Voice calls are unavailable in this mode.
+#
+# For durable data + realtime, run this same repo on one persistent host
+# (Render / Railway / Fly / a VPS) - the full runbook with a ready-made
+# Docker image lives in DEPLOY.md: `docker compose up -d` gives you the
+# app + realtime sidecar + reverse proxy with a persistent /data volume.
+#
+# Recommended in the Netlify dashboard (Site settings > Environment
+# variables) so sessions stop using the development signing key:
+#   JWT_SECRET = <random 32+ char string>
+# ---------------------------------------------------------------------------
 
 [[headers]]
   for = "/flags/*"

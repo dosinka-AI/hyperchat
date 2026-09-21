@@ -6,6 +6,7 @@ import { sounds } from './sounds'
 import { notifications } from './notifications'
 import { voiceEngine } from './voice'
 import { callEngine } from './call'
+import { toast } from '@/hooks/use-toast'
 import type { ClientMessage, ForumPostSummary, PublicUser, UserPresenceChoice, VisiblePresence } from '@/lib/types'
 import { STANDALONE } from './store'
 import { createLocalSocket, type LocalSocket } from '../../../standalone/localsocket'
@@ -27,22 +28,107 @@ function isRoomMuted(
 
 type AnySocket = Socket | LocalSocket
 
+/** The socket, its timers and its liveness clock live on globalThis so a
+ *  Fast Refresh that re-evaluates this module reuses the LIVE connection
+ *  instead of orphaning it. The old flow (module-level singleton) produced
+ *  a split brain under HMR: gen-1 kept the physical socket (and swallowed
+ *  every event into a dead store instance) while gen-2 saw getSocket() ===
+ *  null and silently dropped every emit - voice joins, call SDP/ICE, room
+ *  subscriptions, everything. Symptom: a call that connects but carries no
+ *  audio in either direction, and voice rooms whose presence silently
+ *  evaporates. */
+const SOCKET_KEY = '__hyperionSocket'
+const WATCHDOG_KEY = '__hyperionWatchdog'
+const IDLE_KEY = '__hyperionIdleTimer'
+const GEN_KEY = '__hyperionSocketGen'
+/** unique per module evaluation: a reuse whose generation differs means the
+ *  module body just re-ran (dev Fast Refresh) and the handlers must be
+ *  re-bound to the fresh store/engine closures. */
+const MODULE_GEN = Math.random().toString(36).slice(2)
+
+type GlobalSocketState = {
+  [SOCKET_KEY]?: AnySocket
+  [WATCHDOG_KEY]?: ReturnType<typeof setInterval>
+  [IDLE_KEY]?: ReturnType<typeof setInterval>
+  [GEN_KEY]?: string
+}
+const G = globalThis as unknown as GlobalSocketState
+
 let socket: AnySocket | null = null
 let currentRoom: string | null = null
 let currentServerRoom: string | null = null
 
 // watchdog bookkeeping
-let watchdogTimer: ReturnType<typeof setInterval> | null = null
 let lastActivityAt = Date.now()
 let lastEngineActivity = Date.now()
-let idleTimer: ReturnType<typeof setInterval> | null = null
+/** the last moment ANY packet arrived from the server (pings included). A
+ *  socket that claims connected while nothing has arrived for ~45s is a
+ *  zombie (paused poll loop, half-open websocket after a proxy hiccup):
+ *  cycling it is the only cure. */
+let lastInboundAt = Date.now()
 // the manual status the user picked (online / idle / dnd / invisible);
 // auto-idle only flips ONLINE users to idle, manual statuses stay put
 let manualPresence: UserPresenceChoice = 'online'
 let autoIdled = false
 
 export function getSocket(): AnySocket | null {
+  ensureWired()
   return socket
+}
+
+/** Live socket health for QA/debugging (window.__hyperionSocketDiagnostics). */
+export function socketDiagnostics(): Record<string, unknown> {
+  ensureWired()
+  const s = socket
+  let transport = 'none'
+  if (s && 'io' in s) {
+    const engine = (s as Socket).io?.engine as unknown as { transport?: { name?: string } } | undefined
+    transport = engine?.transport?.name ?? 'unknown'
+  } else if (s) {
+    transport = 'local-broadcast'
+  }
+  return {
+    hasSocket: !!s,
+    connected: s?.connected ?? false,
+    transport,
+    moduleGenerationMatches: G[GEN_KEY] === MODULE_GEN,
+    globalGen: G[GEN_KEY],
+    moduleGen: MODULE_GEN,
+    msSinceInbound: Date.now() - lastInboundAt,
+    msSinceEngineActivity: Date.now() - lastEngineActivity,
+    currentRoom,
+    currentServerRoom,
+  }
+}
+
+if (typeof window !== 'undefined') {
+  ;(window as unknown as { __hyperionSocketDiagnostics?: () => Record<string, unknown> }).__hyperionSocketDiagnostics =
+    socketDiagnostics
+}
+
+/** Adopt a socket that survived this module being re-evaluated (dev Fast
+ *  Refresh). Without this, generation 2 of the module starts with a null
+ *  socket while generation 1's connection keeps humming with listeners that
+ *  feed a dead store instance - every emit silently dropped, every event
+ *  swallowed: a "connected" app whose voice rooms and calls carry no audio.
+ *  Re-wiring re-binds handlers to the CURRENT module's closures and
+ *  re-announces voice/call membership so the media mesh survives. */
+function ensureWired(): void {
+  const surviving = G[SOCKET_KEY]
+  if (!surviving || G[GEN_KEY] === MODULE_GEN) return
+  G[GEN_KEY] = MODULE_GEN
+  socket = surviving
+  try {
+    surviving.removeAllListeners()
+  } catch {
+    /* local-socket flavour has a lighter listener surface */
+  }
+  wireHandlers(surviving)
+  // the physical rooms survived server-side; this module's bookkeeping is
+  // fresh, so re-announce everything important
+  resubscribeAll()
+  voiceEngine.rejoinAfterReconnect()
+  callEngine.rejoinAfterReconnect()
 }
 
 /** Open a room by its socket room key; reused by the desktop notification
@@ -60,6 +146,7 @@ function openRoom(room: string): void {
 /** The room the UI currently shows; used to re-subscribe after reconnects,
  *  which is the fix for updates dying silently until a page reload. */
 export function trackActiveRoom(room: string | null): void {
+  ensureWired()
   currentRoom = room
   if (room) subscribeRoom(room)
 }
@@ -67,6 +154,7 @@ export function trackActiveRoom(room: string | null): void {
 /** The server room the sidebar listens on for live voice participant state
  *  (server:<id> carries voice:state even when not in the call). */
 export function subscribeServerRoom(serverId: string | null): void {
+  ensureWired()
   if (currentServerRoom === `server:${serverId ?? ''}`) return
   if (currentServerRoom) socket?.emit('unsubscribe', { rooms: [currentServerRoom] })
   currentServerRoom = serverId ? `server:${serverId}` : null
@@ -93,6 +181,7 @@ function resubscribeAll(): void {
 /** Force an immediate reconnect attempt (used by the online/visibility hooks
  *  and the watchdog). Safe to call when already connected. */
 function nudgeReconnect(): void {
+  ensureWired()
   if (!socket) return
   if (!socket.connected) {
     // a manager stuck in backoff can sit silent for seconds: force it awake
@@ -102,6 +191,7 @@ function nudgeReconnect(): void {
 }
 
 export function initSocket(presence?: UserPresenceChoice): AnySocket {
+  ensureWired()
   if (socket) {
     // boot may learn the persisted status after the socket exists: apply it
     if (presence && presence !== manualPresence) setPresence(presence)
@@ -113,37 +203,25 @@ export function initSocket(presence?: UserPresenceChoice): AnySocket {
   // BroadcastChannel socket instead of the socket.io service
   if (STANDALONE) {
     socket = createLocalSocket(presence)
+    G[SOCKET_KEY] = socket
+    G[GEN_KEY] = MODULE_GEN
     wireHandlers(socket)
     return socket
   }
 
-  // Local/LAN: talk to the sidecar on :3003 with credentials so the
-  // httpOnly session cookie is included. CORS on the sidecar reflects the
-  // request origin (credentials cannot work with origin '*').
-  // Tunnel / hosted: same-origin `/` so Next can rewrite /socket.io → :3003
-  // (one public URL). Trae can still set NEXT_PUBLIC_SOCKET_URL or use
-  // NEXT_PUBLIC_USE_XTRANSFORM=1.
-  const realtimeUrl = (() => {
-    if (process.env.NEXT_PUBLIC_SOCKET_URL) return process.env.NEXT_PUBLIC_SOCKET_URL
-    if (typeof window === 'undefined') return '/'
-    if (process.env.NEXT_PUBLIC_USE_XTRANSFORM === '1') return '/?XTransformPort=3003'
-    const host = window.location.hostname
-    const isLocal =
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host === '[::1]' ||
-      /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)
-    if (isLocal) return `${window.location.protocol}//${host}:3003`
-    return '/'
-  })()
+  // Realtime endpoint. Default: this sandbox's preview gateway, where the
+  // sidecar rides path '/' behind the XTransformPort query. A deployed host
+  // bakes NEXT_PUBLIC_SOCKET_URL and/or NEXT_PUBLIC_SOCKET_PATH in at build
+  // time to reach the sidecar through its own reverse proxy instead (same
+  // origin, /socket.io path) - see DEPLOY.md for the full-alpha topology.
+  const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || undefined
+  const socketPath = process.env.NEXT_PUBLIC_SOCKET_PATH || undefined
 
-  socket = io(realtimeUrl, {
+  const socketOptions = {
     // polling first, then upgrade to websocket: polling works anywhere plain
     // HTTP works, so hostile proxies can never fully kill realtime; the
     // upgrade happens automatically once a websocket handshake succeeds
-    path: '/socket.io',
     transports: ['polling', 'websocket'],
-    withCredentials: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 750,
@@ -155,7 +233,14 @@ export function initSocket(presence?: UserPresenceChoice): AnySocket {
     auth: {
       presence: presence ?? 'online',
     },
-  })
+  }
+
+  socket =
+    socketUrl || socketPath
+      ? io(socketUrl, { ...socketOptions, path: socketPath ?? '/socket.io' })
+      : io('/?XTransformPort=3003', socketOptions)
+  G[SOCKET_KEY] = socket
+  G[GEN_KEY] = MODULE_GEN
   wireHandlers(socket)
   return socket
 }
@@ -175,9 +260,17 @@ function wireHandlers(activeSocket: AnySocket) {
     const store = useChatStore.getState()
     store.onConnected(true)
     lastEngineActivity = Date.now()
+    lastInboundAt = Date.now()
     // every (re)connection must restore room subscriptions: a reconnect
     // gives us a fresh socket with zero rooms joined
     resubscribeAll()
+    // media self-heal: the disconnect that preceded this reconnect already
+    // dropped our voice/call presence on the realtime service - rejoin both
+    // so participants, WebRTC peers and SDP/ICE signaling all come back
+    // (without this a brief network blip leaves a ghost voice state and a
+    // call that stays connected on screen while no audio flows)
+    voiceEngine.rejoinAfterReconnect()
+    callEngine.rejoinAfterReconnect()
     // catch up on anything missed while the line was down
     void store.syncNow()
   })
@@ -186,12 +279,18 @@ function wireHandlers(activeSocket: AnySocket) {
   // reconnect, so re-attach when the manager opens a new one.
   activeSocket.io.on('open', () => {
     lastEngineActivity = Date.now()
+    lastInboundAt = Date.now()
     const engine = activeSocket.io.engine
+    engine.on('packet', () => {
+      lastInboundAt = Date.now()
+    })
     engine.on('ping', () => {
       lastEngineActivity = Date.now()
+      lastInboundAt = Date.now()
     })
     engine.on('pong', () => {
       lastEngineActivity = Date.now()
+      lastInboundAt = Date.now()
     })
   })
 
@@ -204,13 +303,32 @@ function wireHandlers(activeSocket: AnySocket) {
   })
 
   // ---------- OS / browser level recovery hooks ----------
-  if (typeof window !== 'undefined') {
+  // attached exactly once per page (globalThis flag); the handlers route
+  // through a globalThis dispatch table that each re-wire refreshes, so the
+  // one-time listeners always reach the CURRENT module generation instead of
+  // fighting over stale closures (a gen-1 closure re-wiring back to gen-1
+  // would ping-pong with gen-2 forever).
+  const HOOKS_KEY = '__hyperionHookFns'
+  const HG = globalThis as unknown as {
+    [HOOKS_KEY]?: { nudge: () => void; sync: () => void; activity: () => void }
+  }
+  HG[HOOKS_KEY] = {
+    nudge: () => nudgeReconnect(),
+    sync: () => {
+      void useChatStore.getState().syncNow()
+    },
+    activity: () => markActivity(),
+  }
+  const WINDOW_HOOKS_KEY = '__hyperionWindowHooks'
+  const WH = globalThis as unknown as { [WINDOW_HOOKS_KEY]?: boolean }
+  if (typeof window !== 'undefined' && !WH[WINDOW_HOOKS_KEY]) {
+    WH[WINDOW_HOOKS_KEY] = true
     // the network itself came back (wifi drop, sleep/wake): reconnect now
     window.addEventListener(
       'online',
       () => {
-        nudgeReconnect()
-        void useChatStore.getState().syncNow()
+        HG[HOOKS_KEY]?.nudge()
+        HG[HOOKS_KEY]?.sync()
       },
       { passive: true }
     )
@@ -221,22 +339,36 @@ function wireHandlers(activeSocket: AnySocket) {
       const visible = document.visibilityState === 'visible'
       sounds.setUnfocused(!visible)
       if (visible) {
-        nudgeReconnect()
-        void useChatStore.getState().syncNow()
+        HG[HOOKS_KEY]?.nudge()
+        HG[HOOKS_KEY]?.sync()
       }
     })
 
     // user input marks activity (used for the idle status)
-    window.addEventListener('pointerdown', markActivity, { passive: true })
-    window.addEventListener('keydown', markActivity)
+    window.addEventListener('pointerdown', () => HG[HOOKS_KEY]?.activity(), { passive: true })
+    window.addEventListener('keydown', () => HG[HOOKS_KEY]?.activity())
+
+    // unlock audio on the first interaction (autoplay policies)
+    const unlock = () => {
+      sounds.unlock()
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+    window.addEventListener('pointerdown', unlock, { passive: true })
+    window.addEventListener('keydown', unlock)
+    sounds.setUnfocused(document.visibilityState !== 'visible')
   }
 
   // watchdog: never let the socket sit dead silently. If it claims to be
   // connected we also sanity-probe, because suspended tabs can leave a
-  // zombie socket that never notices it died.
-  watchdogTimer = setInterval(() => {
-    if (!socket) return
-    if (!socket.connected) {
+  // zombie socket that never notices it died. The interval is REPLACED on
+  // every re-wire so it always reads this generation's liveness clocks (a
+  // stale interval would see stale clocks and cycle a healthy socket).
+  if (G[WATCHDOG_KEY]) clearInterval(G[WATCHDOG_KEY])
+  G[WATCHDOG_KEY] = setInterval(() => {
+    const live = G[SOCKET_KEY]
+    if (!live) return
+    if (!live.connected) {
       nudgeReconnect()
       return
     }
@@ -244,21 +376,21 @@ function wireHandlers(activeSocket: AnySocket) {
     // last ping/pong is ancient, the connection is a zombie: cycle it
     if (Date.now() - lastEngineActivity > 90000) {
       lastEngineActivity = Date.now()
-      socket.disconnect().connect()
+      lastInboundAt = Date.now()
+      live.disconnect().connect()
+      return
+    }
+    // inbound liveness: connected + nothing received for 45s (two missed
+    // pings) means the transport is receive-dead (paused poll loop after a
+    // failed websocket upgrade, or a half-open proxy connection). The
+    // engine's own pings may still "succeed" client-side, so this check
+    // is the one that catches the silent zombies.
+    if (Date.now() - lastInboundAt > 45000) {
+      lastInboundAt = Date.now()
+      lastEngineActivity = Date.now()
+      live.disconnect().connect()
     }
   }, 15000)
-
-  // unlock audio on the first interaction (autoplay policies)
-  const unlock = () => {
-    sounds.unlock()
-    window.removeEventListener('pointerdown', unlock)
-    window.removeEventListener('keydown', unlock)
-  }
-  if (typeof window !== 'undefined') {
-    window.addEventListener('pointerdown', unlock, { passive: true })
-    window.addEventListener('keydown', unlock)
-    sounds.setUnfocused(document.visibilityState !== 'visible')
-  }
 
   sock.on('presence:init', (data: {
     onlineUserIds: string[]
@@ -297,6 +429,11 @@ function wireHandlers(activeSocket: AnySocket) {
 
   sock.on('message:new', (msg: ClientMessage) => {
     if (!msg || typeof msg !== 'object' || !msg.id) return
+    // reduced guest echoes (a cross-rung call guest's send landing) carry
+    // only { id, conversationId, authorId }: they exist to tell other tabs
+    // the row landed, never to render — full payloads always carry a room
+    // and an author object
+    if (!msg.room || !msg.author) return
     const store = useChatStore.getState()
     const mine = store.me?.id === msg.authorId
 
@@ -372,6 +509,11 @@ function wireHandlers(activeSocket: AnySocket) {
   sock.on('read:update', (data: { conversationId: string; userId: string; lastReadAt: string }) => {
     if (!data?.conversationId) return
     useChatStore.getState().onReadUpdate(data)
+  })
+
+  sock.on('channel:read', (data: { channelId: string; userId: string; lastReadAt: string }) => {
+    if (!data?.channelId || !data?.userId) return
+    useChatStore.getState().onChannelRead(data)
   })
 
   sock.on('server:refresh', (data: { serverId: string }) => {
@@ -465,14 +607,56 @@ function wireHandlers(activeSocket: AnySocket) {
   })
 
   // ---- voice ----
-  sock.on('voice:state', (data: { channelId: string; participants: { userId: string; username: string; sessionId: string; muted: boolean; deafened: boolean }[] }) => {
+  sock.on('voice:state', (data: { channelId: string; participants: { userId: string; username: string; sessionId: string; muted: boolean; deafened: boolean; recording?: boolean; video?: boolean; screen?: boolean }[]; ringing?: string[]; priorityUserId?: string | null }) => {
     if (!data?.channelId || !Array.isArray(data.participants)) return
     useChatStore.getState().onVoiceState(data)
+  })
+
+  // someone I rang into this channel declined: a quiet heads-up while I
+  // am still sitting in it
+  sock.on('voice:ring-decline', (data: { channelId: string; userId: string; username: string }) => {
+    if (!data?.channelId || !data?.username) return
+    const s = useChatStore.getState()
+    if (s.voiceConnected?.channelId === data.channelId) {
+      toast({ title: `${data.username} declined the ring` })
+    }
   })
 
   sock.on('voice:signal', (data: { from: string; data: unknown }) => {
     if (!data?.from) return
     voiceEngine.handleSignal(data as { from: string; data: never })
+  })
+
+  // another tab or device of this account took over the voice session
+  sock.on('voice:taken-over', (data: { channelId: string; newChannelId?: string }) => {
+    if (!data?.channelId) return
+    useChatStore.getState().onVoiceTakenOver(data)
+  })
+
+  // the sidecar dropped my GUEST voice session (the channel emptied or its
+  // last real member left): tear down cleanly with an honest toast
+  sock.on('voice:dropped', (data: { channelId: string }) => {
+    if (!data?.channelId) return
+    useChatStore.getState().onVoiceDropped(data)
+  })
+
+  // someone started / stopped watching MY screen share in a voice channel
+  sock.on('voice:screen-watch', (data: {
+    channelId: string
+    watcher: { userId: string; username: string; displayName: string | null; avatarUrl: string | null; avatarColor: string }
+    watching: boolean
+  }) => {
+    if (!data?.channelId || !data?.watcher?.userId) return
+    useChatStore.getState().onScreenWatch(data)
+  })
+
+  // a server's soundboard changed (admin added / removed a sound): any list
+  // already loaded refetches so open pickers stay honest
+  sock.on('soundboard:update', (data: { serverId: string }) => {
+    if (!data?.serverId) return
+    if (useChatStore.getState().soundboards[data.serverId]) {
+      void useChatStore.getState().refreshSoundboard(data.serverId)
+    }
   })
 
   // ---- calls ----
@@ -482,6 +666,7 @@ function wireHandlers(activeSocket: AnySocket) {
     from: { userId: string; username: string; displayName: string | null; avatarUrl: string | null; avatarColor: string }
     video: boolean
     createdAt: number
+    voice?: { channelId: string; serverId: string; channelName: string }
   }) => {
     if (!data?.callId || !data?.from?.userId) return
     useChatStore.getState().onCallRing(data)
@@ -493,6 +678,8 @@ function wireHandlers(activeSocket: AnySocket) {
     state: 'ringing' | 'active'
     createdBy: string
     createdAt: number
+    acceptedAt?: number | null
+    ringing?: string[]
     participants: {
       userId: string
       username: string
@@ -503,6 +690,7 @@ function wireHandlers(activeSocket: AnySocket) {
       deafened: boolean
       video: boolean
       screen: boolean
+      recording: boolean
     }[]
   }) => {
     if (!data?.callId || !Array.isArray(data.participants)) return
@@ -524,7 +712,7 @@ function wireHandlers(activeSocket: AnySocket) {
     useChatStore.getState().onCallPeerLeft(data)
   })
 
-  sock.on('call:ended', (data: { callId: string; conversationId: string; reason: string }) => {
+  sock.on('call:ended', (data: { callId: string; conversationId: string; reason: string; acceptedAt?: number | null; durationSec?: number | null }) => {
     if (!data?.callId) return
     useChatStore.getState().onCallEnded(data)
   })
@@ -534,27 +722,21 @@ function wireHandlers(activeSocket: AnySocket) {
     useChatStore.getState().onCallSignal(data)
   })
 
-  sock.on('voice:ring', (data: {
-    inviteId: string
-    channelId: string
-    serverId: string
-    serverName: string
-    serverIconUrl: string | null
-    channelName: string
+  // another tab or device of this account took over the call
+  sock.on('call:taken-over', (data: { callId: string; conversationId: string }) => {
+    if (!data?.callId) return
+    useChatStore.getState().onCallTakenOver(data)
+  })
+
+  // whisper-in-calls: someone in my call started / stopped routing their mic
+  // to me alone; the chip on my call stage follows it
+  sock.on('call:whisper', (data: {
     from: { userId: string; username: string; displayName: string | null; avatarUrl: string | null; avatarColor: string }
-    createdAt: number
+    active: boolean
   }) => {
-    if (!data?.inviteId || !data?.from?.userId) return
-    useChatStore.getState().onVoiceRing(data)
+    if (!data?.from?.userId) return
+    useChatStore.getState().onCallWhisper(data)
   })
-
-  sock.on('voice:ring-ended', (data: { inviteId: string; reason: string; channelId?: string; serverId?: string }) => {
-    if (!data?.inviteId) return
-    useChatStore.getState().onVoiceRingEnded(data)
-  })
-
-  // same-browser tabs share accept/decline/expire so leftover rings clear
-  useChatStore.getState().bindCallTabSync()
 
   // ---- forum ----
   sock.on('forum:post:new', (data: { post: ForumPostSummary }) => {
@@ -571,8 +753,10 @@ function wireHandlers(activeSocket: AnySocket) {
 
   // auto-idle: after 5 minutes without input, ONLINE users dim to idle
   // (yellow) with an away timestamp; manual dnd / invisible / chosen idle
-  // are never overridden by inactivity
-  idleTimer = setInterval(() => {
+  // are never overridden by inactivity. Replaced per re-wire like the
+  // watchdog so it always reads the current generation's clocks.
+  if (G[IDLE_KEY]) clearInterval(G[IDLE_KEY])
+  G[IDLE_KEY] = setInterval(() => {
     if (manualPresence === 'online' && !autoIdled && Date.now() - lastActivityAt > 5 * 60 * 1000) {
       autoIdled = true
       socket?.emit('status:update', { status: 'idle' })
@@ -585,6 +769,7 @@ function wireHandlers(activeSocket: AnySocket) {
 /** Switch the user's own presence status (status picker). Updates the local
  *  bookkeeping, tells the realtime service, and clears any auto-idle state. */
 export function setPresence(presence: UserPresenceChoice): void {
+  ensureWired()
   manualPresence = presence
   autoIdled = false
   // reconnects re-send the handshake auth: keep it in sync
@@ -595,35 +780,41 @@ export function setPresence(presence: UserPresenceChoice): void {
 }
 
 export function destroySocket(): void {
-  if (watchdogTimer) {
-    clearInterval(watchdogTimer)
-    watchdogTimer = null
+  if (G[WATCHDOG_KEY]) {
+    clearInterval(G[WATCHDOG_KEY])
+    delete G[WATCHDOG_KEY]
   }
-  if (idleTimer) {
-    clearInterval(idleTimer)
-    idleTimer = null
+  if (G[IDLE_KEY]) {
+    clearInterval(G[IDLE_KEY])
+    delete G[IDLE_KEY]
   }
   if (socket) {
     socket.removeAllListeners()
     socket.disconnect()
     socket = null
   }
+  delete G[SOCKET_KEY]
+  delete G[GEN_KEY]
   currentRoom = null
+  currentServerRoom = null
   manualPresence = 'online'
   autoIdled = false
 }
 
 export function subscribeRoom(room: string): void {
+  ensureWired()
   socket?.emit('subscribe', { rooms: [room] })
 }
 
 export function unsubscribeRoom(room: string): void {
+  ensureWired()
   socket?.emit('unsubscribe', { rooms: [room] })
 }
 
 let typingSentAt = 0
 
 export function emitTyping(room: string): void {
+  ensureWired()
   const now = Date.now()
   if (now - typingSentAt < 1500) return
   typingSentAt = now
@@ -631,6 +822,7 @@ export function emitTyping(room: string): void {
 }
 
 export function emitTypingStop(room: string): void {
+  ensureWired()
   typingSentAt = 0
   socket?.emit('typing:stop', { room })
 }

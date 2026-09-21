@@ -15,7 +15,14 @@ const COMMENT_SELECT = {
 } as const
 
 /** Paginated comment list, newest page first (the client reverses each
- *  page for display and prepends older pages as they load). */
+ *  page for display and prepends older pages as they load).
+ *
+ *  Pagination is cursor-based: the client passes the oldest comment it
+ *  already holds via `before` (+ `beforeId` as a same-millisecond
+ *  tiebreaker) and gets strictly older rows. Unlike page offsets this
+ *  cannot drift, duplicate or skip rows when comments are added or
+ *  removed while the detail view is open. `more` tells the client
+ *  whether another page exists. */
 export async function GET(req: NextRequest, { params }: Params) {
   const me = await getSessionUser()
   if (!me) return unauthorized()
@@ -25,26 +32,48 @@ export async function GET(req: NextRequest, { params }: Params) {
     const post = await db.post.findUnique({ where: { id: postId }, select: { id: true } })
     if (!post) return notFound('Post not found.')
 
-    const offsetRaw = Number(req.nextUrl.searchParams.get('offset') ?? '0')
-    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.floor(offsetRaw) : 0
+    const beforeRaw = req.nextUrl.searchParams.get('before')
+    const beforeIdRaw = req.nextUrl.searchParams.get('beforeId')
+    let cursor: { createdAt: Date; id: string } | null = null
+    if (beforeRaw) {
+      const t = Date.parse(beforeRaw)
+      if (!Number.isFinite(t)) return badRequest('Bad cursor.')
+      cursor = { createdAt: new Date(t), id: beforeIdRaw ?? '' }
+    }
+
     const PAGE = 30
 
     const rows = await db.postComment.findMany({
-      where: { postId },
-      orderBy: { createdAt: 'desc' },
-      skip: offset,
+      where: {
+        postId,
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: PAGE + 1,
       select: COMMENT_SELECT,
     })
 
-    const comments = rows.slice(0, PAGE).map((c) => ({
+    const more = rows.length > PAGE
+    const page = rows.slice(0, PAGE)
+    const comments = page.map((c) => ({
       id: c.id,
       text: c.text,
       createdAt: c.createdAt.toISOString(),
       author: c.author,
     }))
+    // the next cursor is the oldest row of this page
+    const nextBefore = more && page.length
+      ? { before: page[page.length - 1].createdAt.toISOString(), beforeId: page[page.length - 1].id }
+      : null
 
-    return NextResponse.json({ comments, nextOffset: rows.length > PAGE ? offset + PAGE : null })
+    return NextResponse.json({ comments, more, nextBefore })
   } catch {
     return serverError()
   }

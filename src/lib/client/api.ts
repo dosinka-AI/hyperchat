@@ -4,6 +4,7 @@ import type {
   BookmarkSummary,
   ClientMessage,
   ConversationSummary,
+  ForumTagSummary,
   FriendSummary,
   PublicUser,
   ReminderSummary,
@@ -13,9 +14,12 @@ import type {
   ServerMemberSummary,
   ServerSummary,
   SessionUser,
+  StickerSummary,
   SyncResponse,
   UserPresenceChoice,
+  WhisperListSummary,
 } from '@/lib/types'
+import type { SoundboardSoundSummary } from './soundboard'
 
 export class ApiError extends Error {
   status: number
@@ -32,9 +36,27 @@ export class ApiError extends Error {
   }
 }
 
+/** Sandbox gateway port-forwarding: when the page itself was loaded through
+ *  the ?XTransformPort= convention (this app instance served on a non-default
+ *  port behind the gateway), every relative API fetch must carry the same
+ *  query parameter, or the gateway routes them to the default port instead
+ *  of this instance. Inert everywhere else (no param on the page URL -> no
+ *  suffix), and purely additive when a path already carries its own query. */
+const GATEWAY_PORT_PARAM = 'XTransformPort'
+let cachedGatewaySuffix: string | null = null
+function gatewaySuffix(path: string): string {
+  if (typeof window === 'undefined') return ''
+  if (cachedGatewaySuffix === null) {
+    const port = new URLSearchParams(window.location.search).get(GATEWAY_PORT_PARAM)
+    cachedGatewaySuffix = port ? `${GATEWAY_PORT_PARAM}=${encodeURIComponent(port)}` : ''
+  }
+  if (!cachedGatewaySuffix) return ''
+  return path.includes('?') ? `&${cachedGatewaySuffix}` : `?${cachedGatewaySuffix}`
+}
+
 async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init || {}
-  const res = await fetch(path, {
+  const res = await fetch(path + gatewaySuffix(path), {
     ...rest,
     headers: {
       ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}),
@@ -59,6 +81,49 @@ async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Pr
 }
 
 export type SearchResult = ClientMessage & { channelName?: string | null }
+
+/** Admin panel row: one site account (Task 6-c). */
+export type AdminUserSummary = {
+  id: string
+  username: string
+  displayName: string | null
+  email: string | null
+  verified: boolean
+  siteAdmin: boolean
+  avatarUrl: string | null
+  avatarColor: string
+  createdAt: string
+  serverCount: number
+  messageCount: number
+  lastMessageAt: string | null
+  banned: { reason: string | null; bannedAt: string; bannedBy: string | null } | null
+}
+
+/** Admin panel row: one vault upload (Task 6-c). */
+export type AdminVaultUpload = {
+  id: string
+  filename: string
+  size: number
+  mime: string
+  status: string
+  expiresAt: string
+  downloadCount: number
+  createdAt: string
+  conversationId: string | null
+  uploader: { username: string; avatarUrl: string | null; avatarColor: string } | null
+}
+
+/** Admin panel row: one audit event (Task 6-c). */
+export type AdminAuditEvent = {
+  id: string
+  type: string
+  serverId: string
+  serverName: string
+  actor: string | null
+  target: string | null
+  data: string
+  createdAt: string
+}
 
 export const apiClient = {
   me: () => api<{ user: SessionUser | null }>('/api/auth/me'),
@@ -102,7 +167,7 @@ export const apiClient = {
     api<{ ok: boolean }>('/api/users/me/password', { method: 'PATCH', json: payload }),
 
   userProfile: (username: string) =>
-    api<{ user: PublicUser; mutualServers: { id: string; name: string; iconUrl: string | null }[] }>(`/api/users/${encodeURIComponent(username)}`),
+    api<{ user: PublicUser; mutualServers: string[] }>(`/api/users/${encodeURIComponent(username)}`),
 
   searchUsers: (q: string) => api<{ users: PublicUser[] }>(`/api/users?q=${encodeURIComponent(q)}`),
 
@@ -122,7 +187,7 @@ export const apiClient = {
 
   updateServer: (
     serverId: string,
-    payload: { name?: string; description?: string; iconUrl?: string | null; regenerateInvite?: boolean; blockedWords?: string; visibility?: 'PRIVATE' | 'PUBLIC'; bannerColor?: string | null }
+    payload: { name?: string; description?: string; iconUrl?: string | null; regenerateInvite?: boolean; blockedWords?: string; visibility?: 'PRIVATE' | 'PUBLIC'; bannerColor?: string | null; callChannelsEnabled?: boolean; allowGuestRings?: boolean }
   ) => api<{ server: ServerDetail['server'] }>(`/api/servers/${serverId}`, { method: 'PATCH', json: payload }),
 
   /** public servers for the Discover browser */
@@ -274,6 +339,45 @@ export const apiClient = {
   removeServerEmoji: (serverId: string, emojiId: string) =>
     api<{ ok: boolean }>(`/api/servers/${serverId}/emoji/${emojiId}`, { method: 'DELETE' }),
 
+  // server soundboard (admin-uploaded sound files)
+  serverSounds: (serverId: string) =>
+    api<{ sounds: SoundboardSoundSummary[] }>(`/api/servers/${serverId}/soundboard`),
+
+  addServerSound: (serverId: string, payload: { name: string; url: string; size: number; mime: string }) =>
+    api<{ sound: SoundboardSoundSummary }>(`/api/servers/${serverId}/soundboard`, {
+      method: 'POST',
+      json: payload,
+    }),
+
+  removeServerSound: (serverId: string, soundId: string) =>
+    api<{ ok: boolean }>(`/api/servers/${serverId}/soundboard/${soundId}`, { method: 'DELETE' }),
+
+  // server stickers (admin-uploaded big reaction images)
+  serverStickers: (serverId: string) =>
+    api<{ stickers: StickerSummary[] }>(`/api/servers/${serverId}/stickers`),
+
+  addServerSticker: (serverId: string, payload: { name: string; url: string; size: number; mime: string }) =>
+    api<{ sticker: StickerSummary }>(`/api/servers/${serverId}/stickers`, {
+      method: 'POST',
+      json: payload,
+    }),
+
+  removeServerSticker: (serverId: string, stickerId: string) =>
+    api<{ ok: boolean }>(`/api/servers/${serverId}/stickers/${stickerId}`, { method: 'DELETE' }),
+
+  // saved whisper lists (named multi-whisper presets)
+  whisperLists: () =>
+    api<{ lists: WhisperListSummary[] }>('/api/whisper-lists'),
+
+  addWhisperList: (payload: { name: string; memberIds: string[] }) =>
+    api<{ list: WhisperListSummary }>('/api/whisper-lists', {
+      method: 'POST',
+      json: payload,
+    }),
+
+  removeWhisperList: (listId: string) =>
+    api<{ ok: boolean }>(`/api/whisper-lists/${listId}`, { method: 'DELETE' }),
+
   // friends
   friends: () =>
     api<{ friends: FriendSummary[]; incoming: FriendSummary[]; outgoing: FriendSummary[] }>('/api/friends'),
@@ -308,13 +412,13 @@ export const apiClient = {
 
   // messages
   channelMessages: (channelId: string, before?: string, after?: string, anchor?: string) =>
-    api<{ messages: ClientMessage[]; hasMore: boolean; hasNewer?: boolean; oldestCursor: string | null; myReadAt: string | null }>(
+    api<{ messages: ClientMessage[]; hasMore: boolean; hasNewer?: boolean; oldestCursor: string | null; myReadAt: string | null; friendReadAt?: Record<string, string> }>(
       `/api/channels/${channelId}/messages${before ? `?before=${encodeURIComponent(before)}` : after ? `?after=${encodeURIComponent(after)}` : anchor ? `?anchor=${encodeURIComponent(anchor)}` : ''}`
     ),
 
   sendChannelMessage: (
     channelId: string,
-    payload: { content?: string; imageUrl?: string; replyToId?: string; nonce?: string; whisperTo?: string; threadOfId?: string; attachments?: { url: string; name: string; size: number; mime: string }[] }
+    payload: { content?: string; imageUrl?: string; replyToId?: string; nonce?: string; whisperTo?: string; threadOfId?: string; stickerId?: string; attachments?: { url: string; name: string; size: number; mime: string }[] }
   ) =>
     api<{ message: ClientMessage }>(`/api/channels/${channelId}/messages`, { method: 'POST', json: payload }),
 
@@ -330,12 +434,36 @@ export const apiClient = {
 
   sendConversationMessage: (
     conversationId: string,
-    payload: { content?: string; imageUrl?: string; replyToId?: string; nonce?: string; whisperTo?: string; threadOfId?: string; attachments?: { url: string; name: string; size: number; mime: string }[] }
+    payload: { content?: string; imageUrl?: string; replyToId?: string; nonce?: string; whisperTo?: string; threadOfId?: string; attachments?: { url: string; name: string; size: number; mime: string }[]; fileId?: string }
   ) =>
     api<{ message: ClientMessage }>(`/api/conversations/${conversationId}/messages`, {
       method: 'POST',
       json: payload,
     }),
+
+  // THE VAULT: ephemeral chunked file sends (init → raw chunk PUTs → complete)
+  vaultInit: (payload: { filename: string; size: number; mime?: string; conversationId: string }) =>
+    api<{ id: string; chunkSize: number; totalChunks: number; expiresAt: string }>('/api/files/init', {
+      method: 'POST',
+      json: payload,
+    }),
+
+  vaultComplete: (uploadId: string) =>
+    api<{
+      file: {
+        id: string
+        filename: string
+        mime: string
+        size: number
+        sha256: string | null
+        status: string
+        expiresAt: string
+      }
+    }>(`/api/files/${uploadId}/complete`, { method: 'POST' }),
+
+  /** uploader-only early kill: wipes the chunk files + rows */
+  vaultDeleteFile: (uploadId: string) =>
+    api<{ ok: boolean }>(`/api/files/${uploadId}`, { method: 'DELETE' }),
 
   /** whole thread: the root row plus every reply under it */
   threadMessages: (messageId: string) =>
@@ -350,13 +478,13 @@ export const apiClient = {
       `/api/channels/${channelId}/posts${opts?.cursor ? `?cursor=${encodeURIComponent(opts.cursor)}` : ''}${opts?.sort ? `${opts?.cursor ? '&' : '?'}sort=${opts.sort}` : ''}${opts?.limit ? `${opts?.cursor || opts?.sort ? '&' : '?'}limit=${opts.limit}` : ''}`
     ),
 
-  createForumPost: (channelId: string, payload: { title: string; content?: string }) =>
+  createForumPost: (channelId: string, payload: { title: string; content?: string; tags?: string[] }) =>
     api<{ post: import('@/lib/types').ForumPostSummary }>(`/api/channels/${channelId}/posts`, {
       method: 'POST',
       json: payload,
     }),
 
-  updateForumPost: (postId: string, payload: { title?: string; pinned?: boolean; locked?: boolean }) =>
+  updateForumPost: (postId: string, payload: { title?: string; pinned?: boolean; locked?: boolean; tags?: string[] }) =>
     api<{ post: import('@/lib/types').ForumPostSummary }>(`/api/posts/${postId}`, {
       method: 'PATCH',
       json: payload,
@@ -366,6 +494,19 @@ export const apiClient = {
 
   sendForumReply: (postId: string, payload: { content: string }) =>
     api<{ message: ClientMessage }>(`/api/posts/${postId}/replies`, { method: 'POST', json: payload }),
+
+  // forum channel tags (colored chips, admin-managed per channel)
+  forumTags: (channelId: string) =>
+    api<{ tags: ForumTagSummary[] }>(`/api/channels/${channelId}/forum-tags`),
+
+  addForumTag: (channelId: string, payload: { name: string; color: string }) =>
+    api<{ tag: ForumTagSummary }>(`/api/channels/${channelId}/forum-tags`, {
+      method: 'POST',
+      json: payload,
+    }),
+
+  removeForumTag: (channelId: string, tagId: string) =>
+    api<{ ok: boolean }>(`/api/channels/${channelId}/forum-tags/${tagId}`, { method: 'DELETE' }),
 
   /** copy a message into another room with "forwarded from" attribution */
   forwardMessage: (messageId: string, payload: { targetType: 'channel' | 'conversation'; targetId: string }) =>
@@ -472,6 +613,14 @@ export const apiClient = {
       { method: 'PATCH', json: { editPolicy, invitePolicy } }
     ),
 
+  /** group call setting (owner only): may members ring non-members into
+   *  this group's calls ("cross-ringing")? */
+  setGroupCrossRing: (conversationId: string, allowed: boolean) =>
+    api<{ conversation: { id: string; kind: string; name: string | null; ownerId: string | null; allowCrossRing: boolean } }>(
+      `/api/conversations/${conversationId}`,
+      { method: 'PATCH', json: { allowCrossRing: allowed } }
+    ),
+
   // search
   searchMessages: (q: string, opts?: { serverId?: string; conversationId?: string; conversationsOnly?: boolean }) =>
     api<{ messages: SearchResult[] }>(
@@ -488,6 +637,21 @@ export const apiClient = {
 
   // sync fallback
   sync: (room: string) => api<SyncResponse>(`/api/sync?room=${encodeURIComponent(room)}`),
+
+  // call log rows ("x started a call" system messages)
+  createCallLog: (conversationId: string, opts?: { video?: boolean }) =>
+    api<{ message: ClientMessage }>(`/api/conversations/${conversationId}/call-log`, {
+      method: 'POST',
+      json: { video: opts?.video === true },
+    }),
+  patchCallLog: (
+    conversationId: string,
+    payload: { messageId: string; durationSec?: number | null; missed?: boolean }
+  ) =>
+    api<{ message: ClientMessage }>(`/api/conversations/${conversationId}/call-log`, {
+      method: 'PATCH',
+      json: payload,
+    }),
 
   // bookmarks (personal saved messages)
   bookmarks: () => api<{ bookmarks: BookmarkSummary[] }>('/api/bookmarks'),
@@ -512,20 +676,50 @@ export const apiClient = {
     }),
   cancelReminder: (id: string) => api<{ ok: boolean }>('/api/reminders', { method: 'DELETE', json: { id } }),
 
-  // site admin (account suspensions)
-  adminUsers: (q: string) =>
-    api<{ users: { id: string; username: string; displayName: string | null; role: string; presence: string; avatarUrl: string | null; avatarColor: string; bannedUntil: string | null; banReason: string | null; createdAt: string }[] }>(
-      `/api/admin/users?q=${encodeURIComponent(q)}`
+  // client discovery check: the github txt the owner updates by hand —
+  // clients read it directly; this is the panel's optional sanity window
+  bootstrap: () =>
+    api<{ configured: boolean; bootstrapUrl: string | null; address: string | null; addressAt: string | null; ok: boolean; error?: string }>(
+      '/api/bootstrap'
     ),
 
-  adminBanUser: (userId: string, days: number | null, reason: string) =>
-    api<{ ok: boolean; bannedUntil: string | null }>(`/api/admin/users/${userId}/ban`, {
-      method: 'POST',
-      json: { days, reason },
+  adminSetBootstrap: (payload: { bootstrapUrl?: string; refresh?: boolean }) =>
+    api<{ configured: boolean; bootstrapUrl: string | null; address: string | null; addressAt: string | null; ok: boolean; error?: string }>(
+      '/api/admin/bootstrap',
+      { method: 'PUT', json: payload }
+    ),
+
+  // site admin panel (Task 6-c)
+  adminOverview: () =>
+    api<{
+      users: { total: number; verified: number; newLast7d: number }
+      messages: { total: number; last24h: number }
+      servers: { total: number }
+      vault: { uploads: number; readyBytes: number; uploading: number; expiredSoon: number; diskUsageBytes: number }
+      onlineNow: number
+    }>('/api/admin/overview'),
+
+  adminUsers: (query: string, page = 1) =>
+    api<{ users: AdminUserSummary[]; page: number; pageSize: number; total: number }>(
+      `/api/admin/users?query=${encodeURIComponent(query)}&page=${page}`
+    ),
+
+  adminUserAction: (userId: string, action: 'verify' | 'admin' | 'ban' | 'unban', reason?: string) =>
+    api<{ user: AdminUserSummary }>(`/api/admin/users/${userId}`, {
+      method: 'PUT',
+      json: { action, reason },
     }),
 
-  adminUnbanUser: (userId: string) =>
-    api<{ ok: boolean }>(`/api/admin/users/${userId}/ban`, { method: 'DELETE' }),
+  adminVault: (page = 1) =>
+    api<{ uploads: AdminVaultUpload[]; page: number; pageSize: number; total: number }>(
+      `/api/admin/vault?page=${page}`
+    ),
+
+  adminVaultExpire: (uploadId: string) =>
+    api<{ ok: boolean }>(`/api/admin/vault/${uploadId}`, { method: 'DELETE' }),
+
+  adminAudit: () =>
+    api<{ events: AdminAuditEvent[] }>('/api/admin/audit'),
 
   // upload
   uploadImage: async (blob: Blob): Promise<{ url: string; name: string; size: number; type: string }> => {
@@ -601,11 +795,16 @@ export const apiClient = {
       method: liked ? 'POST' : 'DELETE',
     }),
 
-  profilePostComments: (postId: string, offset: number) =>
+  profilePostComments: (postId: string, cursor?: { before: string; beforeId: string }) =>
     api<{
       comments: { id: string; text: string; createdAt: string; author: ProfileUserBrief }[]
-      nextOffset: number | null
-    }>(`/api/posts/${encodeURIComponent(postId)}/comments?offset=${offset}`),
+      more: boolean
+      nextBefore: { before: string; beforeId: string } | null
+    }>(
+      `/api/posts/${encodeURIComponent(postId)}/comments${
+        cursor ? `?before=${encodeURIComponent(cursor.before)}&beforeId=${encodeURIComponent(cursor.beforeId)}` : ''
+      }`
+    ),
 
   addProfilePostComment: (postId: string, text: string) =>
     api<{ comment: { id: string; text: string; createdAt: string; author: ProfileUserBrief } }>(

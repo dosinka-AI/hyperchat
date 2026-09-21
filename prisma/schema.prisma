@@ -8,80 +8,112 @@ datasource db {
 }
 
 model User {
-  id           String        @id @default(cuid())
-  email        String?       @unique // optional: only required for 2nd account on a device or joining more than one server
-  emailVerifiedAt DateTime? // set when the owner proved control of the email via a verification code
-  username     String        @unique
-  passwordHash String
-  displayName  String?
-  bio          String        @default("")
-  avatarUrl    String?
-  avatarColor  String        @default("#2e2e2e")
-  role         String        @default("USER") // USER | ADMIN (site level, first account becomes ADMIN)
-  customStatus String? // e.g. "building the Hyperion trinity"
-  pronouns      String? // shown on the profile card, e.g. "they/them"
-  presence     String        @default("online") // online | idle | busy | dnd | invisible (manual choice, applied at boot)
-  lastSeenAt   DateTime? // last moment the socket was live; powers "last online" labels
-  bannerColor  String? // profile banner tint; null = neutral
-  bannerUrl    String? // optional banner image; wins over the tint when set
-  bannedUntil  DateTime? // site-level suspension end; null = active (past date = expired)
-  banReason    String? // why the account is suspended, shown to the user
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  ownedServers Server[]      @relation("ServerOwner")
-  memberships  ServerMember[]
-  bans         ServerBan[]
-  messages     Message[]
-  convoJoined  ConversationParticipant[]
-  convoOwned   Conversation[] @relation("ConversationOwner")
-  reactions    Reaction[]
-  readStates   ReadState[]
-  mutes        MuteState[]
-  eventsActor  ServerEvent[] @relation("EventActor")
-  eventsTarget ServerEvent[] @relation("EventTarget")
-  friendRequestsSent     Friendship[] @relation("FriendRequester")
-  friendRequestsReceived Friendship[] @relation("FriendAddressee")
-  blocking     UserBlock[] @relation("Blocker")
-  blockedBy    UserBlock[] @relation("Blocked")
-  bookmarks    Bookmark[]
-  scheduled    ScheduledMessage[]
-  reminders    Reminder[]
-  savedGifs    SavedGif[]
-  emailCodes   EmailCode[]
-  joinLogs     ServerJoinLog[]
-  forumPosts   ForumPost[]
-  posts        Post[]
-  postLikes    PostLike[]
-  postComments PostComment[]
-  followers    Follow[] @relation("Following")
-  following    Follow[] @relation("Follower")
-  stories      Story[]
-  storyViews   StoryView[]
+  id                     String                    @id @default(cuid())
+  email                  String?                   @unique // optional: only required for 2nd account on a device or joining more than one server
+  emailVerifiedAt        DateTime? // set when the owner proved control of the email via a verification code
+  username               String                    @unique
+  passwordHash           String
+  displayName            String?
+  bio                    String                    @default("")
+  avatarUrl              String?
+  avatarColor            String                    @default("#2e2e2e")
+  role                   String                    @default("USER") // USER | ADMIN (site level, first account becomes ADMIN)
+  customStatus           String? // e.g. "building the Hyperion trinity"
+  pronouns               String? // shown on the profile card, e.g. "they/them"
+  presence               String                    @default("online") // online | idle | busy | dnd | invisible (manual choice, applied at boot)
+  lastSeenAt             DateTime? // last moment the socket was live; powers "last online" labels
+  bannerColor            String? // profile banner tint; null = neutral
+  bannerUrl              String? // optional banner image; wins over the tint when set
+  bannedUntil            DateTime? // site-level suspension end; null = active (past date = expired)
+  banReason              String? // why the account is suspended, shown to the user
+  siteAdmin              Boolean   @default(false) // the owner's site-admin flag: gates the admin panel + every /api/admin/* route
+  siteBan                UserBan? // active site ban row (Task 6-c additive ban system; row exists = banned)
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  ownedServers           Server[]                  @relation("ServerOwner")
+  memberships            ServerMember[]
+  bans                   ServerBan[]
+  messages               Message[]
+  convoJoined            ConversationParticipant[]
+  convoOwned             Conversation[]            @relation("ConversationOwner")
+  reactions              Reaction[]
+  readStates             ReadState[]
+  mutes                  MuteState[]
+  eventsActor            ServerEvent[]             @relation("EventActor")
+  eventsTarget           ServerEvent[]             @relation("EventTarget")
+  friendRequestsSent     Friendship[]              @relation("FriendRequester")
+  friendRequestsReceived Friendship[]              @relation("FriendAddressee")
+  blocking               UserBlock[]               @relation("Blocker")
+  blockedBy              UserBlock[]               @relation("Blocked")
+  bookmarks              Bookmark[]
+  scheduled              ScheduledMessage[]
+  reminders              Reminder[]
+  savedGifs              SavedGif[]
+  emailCodes             EmailCode[]
+  joinLogs               ServerJoinLog[]
+  forumPosts             ForumPost[]
+  posts                  Post[]
+  postLikes              PostLike[]
+  postComments           PostComment[]
+  followers              Follow[]                  @relation("Following")
+  following              Follow[]                  @relation("Follower")
+  stories                Story[]
+  storyViews             StoryView[]
+  whisperLists           WhisperList[]             @relation("WhisperListOwner")
+  vaultUploads           FileUpload[]              @relation("VaultUploader")
 
   @@index([username])
 }
 
+// Site-wide key/value settings (Task 6-c). Currently holds the bootstrap
+// pipeline state: 'bootstrapUrl' (the github txt anchor), 'serverAddress',
+// 'serverAddressAt', 'serverAddressSource', 'serverAddressOk',
+// 'serverAddressError'. For the phase-4 zip deployment the same keys ship
+// pre-seeded via config/hyperion.config.json and the BOOTSTRAP_URL env wins
+// over the DB value — the DB setting + env override IS the config file story
+// until then (documented in src/lib/bootstrap.ts).
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// Site-level ban (Task 6-c): one row per banned account. A row existing at
+// all means banned — sessions reject, login 403s, the sidecar handshake
+// refuses a socket. Delete the row to lift the ban.
+model UserBan {
+  userId   String   @id
+  reason   String?
+  bannedAt DateTime @default(now())
+  bannedBy String? // the site admin's user id (plain string, no FK: admin rows outlive bans)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 model Server {
-  id           String            @id @default(cuid())
-  name         String
-  description  String            @default("")
-  iconUrl      String?
-  bannerColor  String? // solid banner tint shown in Discover cards and invite embeds
-  inviteCode   String            @unique
-  ownerId      String
-  owner        User              @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  blockedWords String            @default("") // automod: comma/space/newline separated
-  visibility   String            @default("PRIVATE") // PRIVATE (invite only) | PUBLIC (listed in Discover)
-  members      ServerMember[]
-  channels     Channel[]
-  categories   ChannelCategory[]
-  roles        Role[]
-  bans         ServerBan[]
-  events       ServerEvent[]
-  emoji        ServerEmoji[]
-  joinLogs     ServerJoinLog[]
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  id                  String            @id @default(cuid())
+  name                String
+  description         String            @default("")
+  iconUrl             String?
+  bannerColor         String? // solid banner tint shown in Discover cards and invite embeds
+  inviteCode          String            @unique
+  ownerId             String
+  owner               User              @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  blockedWords        String            @default("") // automod: comma/space/newline separated
+  visibility          String            @default("PRIVATE") // PRIVATE (invite only) | PUBLIC (listed in Discover)
+  callChannelsEnabled Boolean           @default(true) // admins can disable call channels in server voice channels
+  allowGuestRings     Boolean           @default(true) // members may ring people who are NOT server members into voice channels (guests)
+  members             ServerMember[]
+  channels            Channel[]
+  categories          ChannelCategory[]
+  roles               Role[]
+  bans                ServerBan[]
+  events              ServerEvent[]
+  emoji               ServerEmoji[]
+  sounds              SoundboardSound[]
+  stickers            Sticker[]
+  joinLogs            ServerJoinLog[]
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
   @@index([ownerId])
   @@index([visibility])
@@ -100,15 +132,15 @@ model ServerJoinLog {
 }
 
 model EmailCode {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String? // owner when requested from a logged-in flow
   email     String
   purpose   String // verify | password
   codeHash  String
   expiresAt DateTime
-  attempts  Int       @default(0)
-  createdAt DateTime  @default(now())
-  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([email, purpose])
 }
@@ -123,6 +155,62 @@ model ServerEmoji {
   server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
 
   @@unique([serverId, name])
+  @@index([serverId])
+}
+
+// server sticker uploads: big reaction images sent whole (no default set,
+// every sticker is a file an admin uploaded)
+model Sticker {
+  id        String   @id @default(cuid())
+  serverId  String? // owning server (null reserved for future personal stickers)
+  name      String // display name, 1-32 chars
+  url       String // served file path (/api/files/<name>)
+  size      Int      @default(0) // bytes, surfaced in the picker
+  mime      String   @default("image/png") // image/png | image/gif | image/webp ...
+  addedById String // uploader's user id (snapshot scalar, no FK)
+  createdAt DateTime @default(now())
+  server    Server?  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+}
+
+// per-channel forum tag definitions: a colored label posts can carry
+model ForumTag {
+  id        String   @id @default(cuid())
+  channelId String
+  name      String // 1-24 chars, unique per channel
+  color     String   @default("#f5f5f5") // tailwind-friendly hex
+  createdAt DateTime @default(now())
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, name])
+  @@index([channelId])
+}
+
+// saved whisper groups: one click re-whispers to the same people
+model WhisperList {
+  id          String   @id @default(cuid())
+  ownerId     String
+  name        String // 1-32 chars
+  memberIds   String // CSV of user ids
+  memberNames String   @default("") // CSV of usernames for rendering without joins
+  createdAt   DateTime @default(now())
+  owner       User     @relation("WhisperListOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+}
+
+model SoundboardSound {
+  id        String   @id @default(cuid())
+  serverId  String
+  name      String // display name, 1-32 chars
+  url       String // served audio file (/api/files/<name>, admins upload it first)
+  size      Int // bytes, surfaced in the picker
+  mime      String // audio/mpeg | audio/wav | audio/ogg ...
+  addedById String
+  createdAt DateTime @default(now())
+  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
   @@index([serverId])
 }
 
@@ -145,15 +233,15 @@ model ServerMember {
 }
 
 model Role {
-  id          String         @id @default(cuid())
-  serverId    String
-  name        String
-  color       String         @default("#f5f5f5") // hex color shown on names and in the member list
-  permissions Int            @default(0) // bitmask, see src/lib/perm.ts
-  position    Int            @default(0) // higher = displayed higher in the member list
-  createdAt   DateTime       @default(now())
-  server      Server         @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  members     ServerMember[]
+  id            String          @id @default(cuid())
+  serverId      String
+  name          String
+  color         String          @default("#f5f5f5") // hex color shown on names and in the member list
+  permissions   Int             @default(0) // bitmask, see src/lib/perm.ts
+  position      Int             @default(0) // higher = displayed higher in the member list
+  createdAt     DateTime        @default(now())
+  server        Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  members       ServerMember[]
   channelAccess ChannelAccess[]
 
   @@index([serverId, position])
@@ -173,33 +261,34 @@ model ServerBan {
 }
 
 model ChannelCategory {
-  id        String    @id @default(cuid())
-  serverId  String
-  name      String
-  position  Int       @default(0)
-  server    Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  channels  Channel[]
+  id       String    @id @default(cuid())
+  serverId String
+  name     String
+  position Int       @default(0)
+  server   Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  channels Channel[]
 
   @@index([serverId])
 }
 
 model Channel {
-  id               String            @id @default(cuid())
-  serverId         String
-  name             String
-  topic            String?
-  position         Int               @default(0)
-  categoryId       String?
-  category         ChannelCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  type             String            @default("text") // text | voice | forum (immutable after creation)
-  slowmodeSeconds  Int               @default(0) // 0 = off; max 3600
-  locked           Boolean           @default(false) // read-only except for mods
-  private          Boolean           @default(false) // visible only to allowed roles + mods
-  createdAt        DateTime          @default(now())
-  server           Server            @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  messages         Message[]
-  access           ChannelAccess[]
-  forumPosts       ForumPost[]
+  id              String           @id @default(cuid())
+  serverId        String
+  name            String
+  topic           String?
+  position        Int              @default(0)
+  categoryId      String?
+  category        ChannelCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  type            String           @default("text") // text | voice | forum (immutable after creation)
+  slowmodeSeconds Int              @default(0) // 0 = off; max 3600
+  locked          Boolean          @default(false) // read-only except for mods
+  private         Boolean          @default(false) // visible only to allowed roles + mods
+  createdAt       DateTime         @default(now())
+  server          Server           @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages        Message[]
+  access          ChannelAccess[]
+  forumPosts      ForumPost[]
+  forumTags       ForumTag[]
 
   @@unique([serverId, name])
   @@index([serverId])
@@ -213,6 +302,7 @@ model ForumPost {
   firstMessageId String? // the root Message of the post thread (no FK: deleted manually on post delete)
   pinned         Boolean  @default(false)
   locked         Boolean  @default(false)
+  tags           String   @default("") // CSV of ForumTag names assigned to this post
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   channel        Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
@@ -233,38 +323,42 @@ model ChannelAccess {
 }
 
 model Message {
-  id             String        @id @default(cuid())
-  content        String?
-  imageUrl       String? // legacy single-image field, still used for old messages
-  attachments    String? // JSON array: [{ url, name, size, mime }]
-  expiresAt      DateTime? // temporary messages: auto-delete stamp (null = permanent)
-  editedAt       DateTime?
-  pinned         Boolean       @default(false)
-  pinnedAt       DateTime?
-  pingsEveryone  Boolean       @default(false) // true when @everyone/@here was sent with permission
+  id                String        @id @default(cuid())
+  content           String?
+  imageUrl          String? // legacy single-image field, still used for old messages
+  attachments       String? // JSON array: [{ url, name, size, mime }]
+  expiresAt         DateTime? // temporary messages: auto-delete stamp (null = permanent)
+  editedAt          DateTime?
+  pinned            Boolean       @default(false)
+  pinnedAt          DateTime?
+  pingsEveryone     Boolean       @default(false) // true when @everyone/@here was sent with permission
   whisperTargetId   String? // whisper: only the author and this user ever see the row
   whisperTargetName String? // username snapshot for rendering ("whispered to x")
-  systemKind  String? // system rows: 'pin' | 'unpin' (content stays null)
-  systemData  String? // JSON payload for system rows, e.g. { messageId, byUsername }
-  replyToId      String?
-  replyTo        Message?      @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies        Message[]     @relation("MessageReplies")
-  threadOfId     String? // thread: the root message this row replies to (threads never nest)
-  threadOf       Message?      @relation("MessageThreads", fields: [threadOfId], references: [id], onDelete: Cascade)
-  threadMessages Message[]     @relation("MessageThreads")
+  stickerName       String? // sticker message: the sticker's display name
+  stickerUrl        String? // sticker message: served file path (/api/files/<name>)
+  systemKind        String? // system rows: 'pin' | 'unpin' (content stays null)
+  systemData        String? // JSON payload for system rows, e.g. { messageId, byUsername }
+  replyToId         String?
+  replyTo           Message?      @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies           Message[]     @relation("MessageReplies")
+  threadOfId        String? // thread: the root message this row replies to (threads never nest)
+  threadOf          Message?      @relation("MessageThreads", fields: [threadOfId], references: [id], onDelete: Cascade)
+  threadMessages    Message[]     @relation("MessageThreads")
   forwardedFromId   String? // forward: the original message id (snapshot, not a FK)
   forwardedFromName String? // forward: original author username at forward time
-  editHistory    String? // JSON array of { content, at } prior versions (newest last, capped)
-  authorId       String
-  channelId      String?
-  conversationId String?
-  createdAt      DateTime      @default(now())
-  author         User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  channel        Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  reactions      Reaction[]
-  bookmarks      Bookmark[]
-  reminders      Reminder[]
+  editHistory       String? // JSON array of { content, at } prior versions (newest last, capped)
+  fileId            String?       @unique // THE VAULT: the ephemeral chunked upload this row carries (nulled once the file dies)
+  file              FileUpload?   @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  authorId          String
+  channelId         String?
+  conversationId    String?
+  createdAt         DateTime      @default(now())
+  author            User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  channel           Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation      Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  reactions         Reaction[]
+  bookmarks         Bookmark[]
+  reminders         Reminder[]
 
   @@index([channelId, createdAt])
   @@index([conversationId, createdAt])
@@ -287,32 +381,34 @@ model Reaction {
 }
 
 model Conversation {
-  id               String                    @id @default(cuid())
-  kind             String                    @default("DM") // DM (1:1) | GROUP (multi-member)
-  name             String? // group display name (GROUP only)
-  iconUrl          String? // optional group photo; null keeps the stacked-members look
-  ownerId          String? // group owner: can kick and change the member limit (GROUP only)
-  owner            User?                     @relation("ConversationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  limitRaised      Boolean                   @default(false) // false = 5-member cap, true = 50-member cap (GROUP only)
-  editPolicy       String                    @default("ALL") // GROUP: who can rename/photo = ALL | OWNER
-  invitePolicy     String                    @default("ALL") // GROUP: who can add members = ALL | OWNER
+  id                String                    @id @default(cuid())
+  kind              String                    @default("DM") // DM (1:1) | GROUP (multi-member)
+  name              String? // group display name (GROUP only)
+  iconUrl           String? // optional group photo; null keeps the stacked-members look
+  ownerId           String? // group owner: can kick and change the member limit (GROUP only)
+  owner             User?                     @relation("ConversationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  limitRaised       Boolean                   @default(false) // false = 5-member cap, true = 50-member cap (GROUP only)
+  editPolicy        String                    @default("ALL") // GROUP: who can rename/photo = ALL | OWNER
+  invitePolicy      String                    @default("ALL") // GROUP: who can add members = ALL | OWNER
+  allowCrossRing    Boolean                   @default(true) // GROUP: members may ring non-members into calls (owner can disable)
   tempExpiryMinutes Int? // DM-only auto-delete window (60 | 1440 | 10080); null = off
-  createdAt        DateTime                  @default(now())
-  participants     ConversationParticipant[]
-  messages         Message[]
+  createdAt         DateTime                  @default(now())
+  participants      ConversationParticipant[]
+  messages          Message[]
+  vaultUploads      FileUpload[]              @relation("VaultConversation")
 
   @@index([createdAt])
   @@index([ownerId])
 }
 
 model ConversationParticipant {
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   conversationId String
   userId         String
-  hidden         Boolean       @default(false)
-  pinned         Boolean       @default(false)
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  hidden         Boolean      @default(false)
+  pinned         Boolean      @default(false)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, userId])
   @@index([userId])
@@ -328,18 +424,34 @@ model ReadState {
   @@unique([userId, scopeKey])
 }
 
+/** A cross-rung call guest: a user who was rung into a conversation call
+ *  they are NOT a participant of. Stamped by the realtime sidecar when the
+ *  guest accepts, read by the messages POST route to let them SEND (but
+ *  never read) into that conversation while the call lives. Rows die with
+ *  the call; expiresAt is the belt-and-braces ceiling (24h). */
+model CallGuest {
+  id             String   @id @default(cuid())
+  callId         String
+  conversationId String
+  userId         String
+  expiresAt      DateTime
+
+  @@index([conversationId, userId])
+  @@index([callId])
+}
+
 model Friendship {
-  id          String   @id @default(cuid())
-  requesterId String
-  addresseeId String
-  status      String   @default("PENDING") // PENDING | ACCEPTED
+  id             String    @id @default(cuid())
+  requesterId    String
+  addresseeId    String
+  status         String    @default("PENDING") // PENDING | ACCEPTED
   requesterLabel String? // the requester's private nickname for the addressee
   addresseeLabel String? // the addressee's private nickname for the requester
-  expiresAt   DateTime? // temporary friendship: auto-drops after this stamp (null = forever)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  requester   User     @relation("FriendRequester", fields: [requesterId], references: [id], onDelete: Cascade)
-  addressee   User     @relation("FriendAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+  expiresAt      DateTime? // temporary friendship: auto-drops after this stamp (null = forever)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  requester      User      @relation("FriendRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee      User      @relation("FriendAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
 
   @@unique([requesterId, addresseeId])
   @@index([addresseeId, status])
@@ -347,12 +459,12 @@ model Friendship {
 }
 
 model UserBlock {
-  id         String   @id @default(cuid())
-  blockerId  String
-  blockedId  String
-  createdAt  DateTime @default(now())
-  blocker    User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
-  blocked    User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
 
   @@unique([blockerId, blockedId])
   @@index([blockedId])
@@ -399,14 +511,14 @@ model Bookmark {
 
 // Messages composed now but delivered later (Discord does not have this)
 model ScheduledMessage {
-  id             String    @id @default(cuid())
-  authorId       String
-  scopeKey       String // 'channel:<id>' or 'conversation:<id>'
-  content        String
-  sendAt         DateTime
-  sentAt         DateTime? // null = still pending
-  createdAt      DateTime  @default(now())
-  author         User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  id        String    @id @default(cuid())
+  authorId  String
+  scopeKey  String // 'channel:<id>' or 'conversation:<id>'
+  content   String
+  sendAt    DateTime
+  sentAt    DateTime? // null = still pending
+  createdAt DateTime  @default(now())
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   @@index([authorId, sentAt])
 }
@@ -515,4 +627,56 @@ model SavedGif {
 
   @@unique([userId, url])
   @@index([userId, createdAt])
+}
+
+// THE VAULT: ephemeral chunked file sends for DMs. Chunks live on disk,
+// content-addressed by their own sha256 (db/vault/<sha>), so identical
+// chunks across uploads share storage. Nothing ever scans the disk: reads
+// compute the covering chunks from (chunkSize, totalChunks) math and stream
+// exactly the requested byte range. Size-tiered TTL at init (>=1GiB: 10m,
+// >=100MiB: 24h, >=10MiB: 7d, else 30d), enforced by a lazy sweep on every
+// vault API call plus a 60s interval singleton.
+model FileUpload {
+  id             String          @id @default(cuid())
+  uploaderId     String
+  conversationId String? // the DM/group this file was sent in (null = future channel use)
+  filename       String // display name, capped 255
+  mime           String          @default("application/octet-stream") // capped 100
+  size           Int // bytes, hard-capped at 1 GiB at init
+  sha256         String? // whole-file hash, stamped at completion
+  chunkSize      Int // bytes per chunk (4 MiB)
+  totalChunks    Int
+  status         String          @default("uploading") // uploading -> ready -> (swept)
+  expiresAt      DateTime
+  downloadCount  Int             @default(0)
+  // dangerous-file sniff (vaultSafetyWarnings): JSON array of short codes —
+  // 'executable' | 'script' | 'double-extension' | 'mime-mismatch' | 'archive'
+  warnings       String?
+  // VirusTotal hook: null = never queued | pending | clean | detected | failed | skipped
+  scanStatus     String?
+  // JSON verdict summary from the scanner (engine + stats) for the admin/uploader
+  scanResult     String?
+  createdAt      DateTime        @default(now())
+  uploader       User            @relation("VaultUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  conversation   Conversation?   @relation("VaultConversation", fields: [conversationId], references: [id], onDelete: Cascade)
+  chunks         FileChunkMeta[]
+  message        Message? // the single row that carried this file, if any
+
+  @@index([expiresAt])
+  @@index([uploaderId])
+  @@index([conversationId])
+}
+
+// one row per stored chunk: where it lives on disk (sha256 = filename) and
+// how big it is. The unique pair keeps re-PUTs idempotent.
+model FileChunkMeta {
+  id         String     @id @default(cuid())
+  uploadId   String
+  chunkIndex Int
+  size       Int
+  sha256     String
+  upload     FileUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@unique([uploadId, chunkIndex])
+  @@index([sha256]) // shared-chunk refcount check at delete time
 }

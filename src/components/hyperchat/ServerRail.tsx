@@ -9,7 +9,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Crown, Plus, Compass, Shield, Users } from 'lucide-react'
 import { Avatar } from './Avatar'
 import { ServerBrowserDialog } from './ServerBrowserDialog'
-import { AdminDialog } from './AdminDialog'
 
 type ServerRailProps = {
   onAddServer: () => void
@@ -30,7 +29,7 @@ export function ServerRail({ onAddServer, onNavigated }: ServerRailProps) {
   const friendsViewOpen = useChatStore((s) => s.friendsViewOpen)
 
   const [discoverOpen, setDiscoverOpen] = useState(false)
-  const [adminOpen, setAdminOpen] = useState(false)
+  const setAdminPanelOpen = useChatStore((s) => s.setAdminPanelOpen)
 
   const homeActive = activeServerId === null && !friendsViewOpen
   const dmUnread = conversations.reduce((acc, c) => acc + c.unreadCount, 0)
@@ -69,7 +68,7 @@ export function ServerRail({ onAddServer, onNavigated }: ServerRailProps) {
             aria-label="Direct messages, home"
             aria-current={homeActive ? 'page' : undefined}
           >
-            {homeActive && <span className="absolute -left-[10px] w-[3px] h-7 bg-white" />}
+            {homeActive && <span className="rail-pill absolute -left-[10px] w-[3px] h-7 bg-white rounded-full" />}
             <HyperionMark className="w-7 h-7 md:w-8 md:h-8 rounded-sm" />
             {homeBadge > 0 && !homeActive && (
               <span className="absolute -bottom-1 -right-1 min-w-4 h-4 px-1 bg-hyper text-[9px] font-bold text-white grid place-items-center rounded-sm">
@@ -98,7 +97,7 @@ export function ServerRail({ onAddServer, onNavigated }: ServerRailProps) {
             aria-label="Friends"
             aria-current={friendsViewOpen ? 'page' : undefined}
           >
-            {friendsViewOpen && <span className="absolute -left-[10px] w-[3px] h-7 bg-white" />}
+            {friendsViewOpen && <span className="rail-pill absolute -left-[10px] w-[3px] h-7 bg-white rounded-full" />}
             <Users className="size-5 md:size-6" />
             {incomingRequests.length > 0 && !friendsViewOpen && (
               <span className="absolute -bottom-1 -right-1 min-w-4 h-4 px-1 bg-hyper text-[9px] font-bold text-white grid place-items-center rounded-sm">
@@ -132,7 +131,7 @@ export function ServerRail({ onAddServer, onNavigated }: ServerRailProps) {
                 aria-label={`Server ${server.name}`}
                 aria-current={active ? 'page' : undefined}
               >
-                {active && <span className="absolute -left-[10px] w-[3px] h-7 bg-white" />}
+                {active && <span className="rail-pill absolute -left-[10px] w-[3px] h-7 bg-white rounded-full" />}
                 {server.iconUrl ? (
                    
                   <img src={server.iconUrl} alt="" className="size-8 md:size-9 rounded-sm object-cover" draggable={false} />
@@ -165,13 +164,13 @@ export function ServerRail({ onAddServer, onNavigated }: ServerRailProps) {
         )
       })}
 
-      {me?.role === 'ADMIN' && (
+      {me?.siteAdmin && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               onClick={() => {
                 sounds.play('lightTick')
-                setAdminOpen(true)
+                setAdminPanelOpen(true)
               }}
               className="w-11 h-11 md:w-12 md:h-12 rounded-sm border border-dashed border-white/25 grid place-items-center text-muted-foreground hover:text-foreground hover:border-white/50 transition-colors"
               aria-label="Site admin"
@@ -215,7 +214,6 @@ export function ServerRail({ onAddServer, onNavigated }: ServerRailProps) {
       </Tooltip>
 
       <ServerBrowserDialog open={discoverOpen} onOpenChange={setDiscoverOpen} />
-      {me?.role === 'ADMIN' && <AdminDialog open={adminOpen} onOpenChange={setAdminOpen} />}
     </nav>
   )
 }

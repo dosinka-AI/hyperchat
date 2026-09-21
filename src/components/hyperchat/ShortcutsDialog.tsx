@@ -26,6 +26,14 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     ],
   },
   {
+    title: 'in a call',
+    items: [
+      { keys: ['m'], label: 'mute / unmute' },
+      { keys: ['d'], label: 'deafen / undeafen' },
+      { keys: ['f'], label: 'fullscreen and back' },
+    ],
+  },
+  {
     title: 'everywhere',
     items: [
       { keys: ['shift', '?'], label: 'this overlay' },

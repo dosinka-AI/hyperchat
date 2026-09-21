@@ -160,14 +160,14 @@ export function ConfirmDialogHost() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[90] grid place-items-center bg-black/70 backdrop-blur-[2px] p-4"
+      className="fixed inset-0 z-[90] grid place-items-center bg-black/70 p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) settle(request.input ? null : false)
       }}
       role="presentation"
     >
       <div
-        className="w-full max-w-sm bg-popover border border-border rounded-sm shadow-2xl dialog-in"
+        className="w-full max-w-sm glass-raise border border-border rounded-sm shadow-2xl dialog-in"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"

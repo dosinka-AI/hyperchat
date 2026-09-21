@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * HyperChat sound engine.
+ * Hyperion sound engine.
  *
  * Sounds are grouped into three switchable categories (message, join, ui)
  * so the settings page can expose real control instead of one mute-all
@@ -39,6 +39,8 @@ export type SoundName =
   | 'callRingOut'
   | 'callEnter'
   | 'callLeave'
+  | 'recStart'
+  | 'recStop'
 
 /** Which category each sound belongs to; anything not listed is ui. */
 const CATEGORY: Partial<Record<SoundName, 'message' | 'join' | 'ui'>> = {
@@ -52,6 +54,10 @@ const CATEGORY: Partial<Record<SoundName, 'message' | 'join' | 'ui'>> = {
   ml: 'message',
   join: 'join',
   enter: 'join',
+  callEnter: 'join',
+  callLeave: 'join',
+  recStart: 'join',
+  recStop: 'join',
   error: 'ui',
 }
 
@@ -85,6 +91,8 @@ const FILES: Record<string, string> = {
   callRingOut: '/sounds/call-ring-out.wav',
   callEnter: '/sounds/call-enter.wav',
   callLeave: '/sounds/call-leave.wav',
+  recStart: '/sounds/recording-start.wav',
+  recStop: '/sounds/recording-stop.wav',
 }
 
 const VOLUMES: Record<string, number> = {
@@ -95,7 +103,7 @@ const VOLUMES: Record<string, number> = {
   join: 0.3,
   ping: 0.4,
   error: 0.35,
-  whoom: 0.2,
+  whoom: 0.28,
   uiWhoom: 0.2,
   lightTick: 0.4,
   midTick: 0.5,
@@ -114,6 +122,8 @@ const VOLUMES: Record<string, number> = {
   callRingOut: 0.4,
   callEnter: 0.45,
   callLeave: 0.45,
+  recStart: 0.6,
+  recStop: 0.6,
 }
 
 /** The voice picker in settings: every shipped sound, one entry per file. */
@@ -138,8 +148,8 @@ export const VOICES: { id: SoundName; label: string }[] = [
   { id: 'heavyTick', label: 'heavy tick' },
   { id: 'heavyTick2', label: 'heavy tick 2' },
   { id: 'veryHeavyTick', label: 'very heavy tick' },
-  { id: 'callEnter', label: 'call connect' },
-  { id: 'callLeave', label: 'call leave' },
+  { id: 'callEnter', label: 'voice join' },
+  { id: 'callLeave', label: 'voice leave' },
 ]
 
 /** Events whose voices can be swapped from settings. 'ui' covers every

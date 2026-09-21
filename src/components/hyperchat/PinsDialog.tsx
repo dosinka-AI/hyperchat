@@ -10,72 +10,35 @@ import { Avatar } from './Avatar'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Pin, PinOff, Hash } from 'lucide-react'
 import { PERM } from '@/lib/perm'
-import { FileMediaEmbed } from './MediaSurface'
 
-/** Images and media under a pinned message: thumbnails, click opens lightbox;
- *  audio/video keep the same embeds as the message list. */
-function PinMedia({ msg, onOpen }: { msg: ClientMessage; onOpen: (url: string) => void }) {
+/** Images under a pinned message: thumbnail grid, click opens the lightbox. */
+function PinImages({ msg, onOpen }: { msg: ClientMessage; onOpen: (url: string) => void }) {
   const urls: string[] = []
   if (msg.imageUrl) urls.push(msg.imageUrl)
-  const imageAtts = (msg.attachments ?? []).filter((a) => a.mime.startsWith('image/') && a.url)
-  for (const a of imageAtts) {
-    if (!urls.includes(a.url)) urls.push(a.url)
+  for (const a of msg.attachments ?? []) {
+    if (a.mime.startsWith('image/') && a.url) urls.push(a.url)
   }
-  // bare image urls pasted as the whole message body
-  if (msg.content) {
-    for (const line of msg.content.split('\n')) {
-      const t = line.trim()
-      if (/^https?:\/\/\S+\.(png|jpe?g|gif|webp|avif)(\?\S*)?$/i.test(t) && !urls.includes(t)) {
-        urls.push(t)
-      }
-    }
-  }
-  const mediaFiles = (msg.attachments ?? []).filter(
-    (a) => a.mime.startsWith('video/') || a.mime.startsWith('audio/')
-  )
-
+  if (urls.length === 0) return null
   return (
-    <>
-      {urls.length > 0 && (
-        <div className={`mt-1.5 flex gap-1.5 flex-wrap ${urls.length > 1 ? 'max-w-64' : ''}`}>
-          {urls.map((url) => (
-            <button
-              key={url}
-              type="button"
-              onClick={() => onOpen(url)}
-              className="block rounded-sm overflow-hidden border border-white/10 hover:border-white/30 transition-colors"
-              aria-label="Open image"
-            >
-              <img
-                src={url}
-                alt="pinned image"
-                loading="lazy"
-                draggable={false}
-                className={urls.length > 1 ? 'size-20 object-cover' : 'max-h-28 max-w-56 object-contain'}
-              />
-            </button>
-          ))}
-        </div>
-      )}
-      {mediaFiles.length > 0 && (
-        <div className="mt-1.5 flex flex-col gap-1 max-w-md">
-          {mediaFiles.map((f) => (
-            <FileMediaEmbed
-              key={`${f.url}-${f.name}`}
-              url={f.url}
-              mime={f.mime}
-              name={f.name}
-              size={f.size}
-              room={msg.room}
-              kind={f.kind}
-              duration={f.duration}
-              waveform={f.waveform}
-              variant={f.kind === 'voice' ? 'voice' : 'file'}
-            />
-          ))}
-        </div>
-      )}
-    </>
+    <div className={`mt-1.5 flex gap-1.5 flex-wrap ${urls.length > 1 ? 'max-w-64' : ''}`}>
+      {urls.map((url) => (
+        <button
+          key={url}
+          type="button"
+          onClick={() => onOpen(url)}
+          className="block rounded-sm overflow-hidden border border-white/10 hover:border-white/30 transition-colors"
+          aria-label="Open image"
+        >
+          <img
+            src={url}
+            alt="pinned image"
+            loading="lazy"
+            draggable={false}
+            className={urls.length > 1 ? 'size-20 object-cover' : 'max-h-28 max-w-56 object-contain'}
+          />
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -130,7 +93,7 @@ export function PinsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg p-0 border-border bg-app-sidebar overflow-hidden rounded-sm" aria-describedby={undefined}>
+      <DialogContent className="max-w-lg p-0 border-border glass overflow-hidden rounded-sm" aria-describedby={undefined}>
         <DialogTitle className="sr-only">Pinned messages</DialogTitle>
 
         <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
@@ -157,7 +120,7 @@ export function PinsDialog({
                 </div>
                 <div className="mt-0.5 text-[13px] text-foreground/85 break-words">
                   {msg.content ? renderMessageContent(msg.content, { myUsername: me?.username }) : null}
-                  <PinMedia msg={msg} onOpen={setLightbox} />
+                  <PinImages msg={msg} onOpen={setLightbox} />
                 </div>
               </div>
               <div className="flex flex-col gap-1 shrink-0">

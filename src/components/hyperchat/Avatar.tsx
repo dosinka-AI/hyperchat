@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { initialsOf } from '@/lib/client/format'
 
@@ -7,7 +8,7 @@ type AvatarProps = {
   name: string
   color?: string
   url?: string | null
-  size?: 'sm' | 'md' | 'lg' | 'mx' | 'xl' | '2xl'
+  size?: 'sm' | 'md' | 'lg' | 'mx' | 'lgx' | 'xl' | '2xl'
   /** full presence: online (green), idle (yellow), busy (blue clock), dnd (red), offline (gray) */
   status?: 'online' | 'idle' | 'busy' | 'dnd' | 'offline'
   online?: boolean | null
@@ -16,13 +17,24 @@ type AvatarProps = {
   onClick?: (e: React.MouseEvent) => void
 }
 
-const SIZES = {
-  sm: 'size-6 text-[10px]',
-  md: 'size-8 text-xs',
-  lg: 'size-10 text-sm',
-  mx: 'size-14 text-base',
-  xl: 'size-20 text-2xl',
-  '2xl': 'size-28 text-4xl',
+const BOX_SIZES = {
+  sm: 'size-6',
+  md: 'size-8',
+  lg: 'size-10',
+  mx: 'size-14',
+  lgx: 'size-16',
+  xl: 'size-20',
+  '2xl': 'size-28',
+}
+
+const TEXT_SIZES = {
+  sm: 'text-[10px]',
+  md: 'text-xs',
+  lg: 'text-sm',
+  mx: 'text-base',
+  lgx: 'text-lg',
+  xl: 'text-2xl',
+  '2xl': 'text-4xl',
 }
 
 const DOT_SIZES = {
@@ -30,6 +42,7 @@ const DOT_SIZES = {
   md: 'size-3.5',
   lg: 'size-4',
   mx: 'size-4.5',
+  lgx: 'size-5',
   xl: 'size-6',
   '2xl': 'size-7',
 }
@@ -103,16 +116,20 @@ export function Avatar({
 }: AvatarProps) {
   const effective: 'online' | 'idle' | 'busy' | 'dnd' | 'offline' =
     status ?? (online ? 'online' : 'offline')
-  const inner = url ? (
+  // a stale upload reference (file lost to a backup gap) must degrade to
+  // the initials tile, never a broken-image glyph
+  const [broken, setBroken] = useState(false)
+  const inner = url && !broken ? (
     <img
       src={url}
       alt=""
-      className={cn(SIZES[size], 'rounded-full object-cover select-none')}
+      className="size-full rounded-full object-cover select-none"
       draggable={false}
+      onError={() => setBroken(true)}
     />
   ) : (
     <div
-      className={cn(SIZES[size], 'rounded-full grid place-items-center font-semibold select-none', textToneFor(color))}
+      className={cn('size-full rounded-full grid place-items-center font-semibold select-none', TEXT_SIZES[size], textToneFor(color))}
       style={{ backgroundColor: color }}
       aria-hidden="true"
     >
@@ -122,7 +139,7 @@ export function Avatar({
 
   return (
     <div
-      className={cn('relative shrink-0', onClick && 'cursor-pointer', className)}
+      className={cn(BOX_SIZES[size], 'relative shrink-0 rounded-full', onClick && 'cursor-pointer', className)}
       onClick={onClick ? (e) => onClick(e) : undefined}
       role={onClick ? 'button' : undefined}
       aria-hidden={onClick ? undefined : true}

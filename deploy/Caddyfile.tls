@@ -1,0 +1,15 @@
+# HyperChat front door - automatic HTTPS mode (SITE_ADDRESS set to a real
+# domain). Caddy obtains and renews a Let's Encrypt certificate for the
+# domain, redirects HTTP to HTTPS, and routes exactly like the plain-HTTP
+# flavor: /socket.io/* to the realtime sidecar, everything else to the app.
+# Ports 80 AND 443 must be reachable from the internet for the certificate
+# handshake (HTTP-01 / TLS-ALPN challenge).
+{$SITE_ADDRESS}
+
+handle_path /socket.io/* {
+	reverse_proxy 127.0.0.1:3003
+}
+
+handle {
+	reverse_proxy 127.0.0.1:{$APP_PORT:3100}
+}

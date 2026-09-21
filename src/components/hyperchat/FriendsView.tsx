@@ -14,6 +14,7 @@ import type { FriendSummary, PublicUser } from '@/lib/types'
 import { awayForLabel } from './MessageList'
 import { lastOnlineLabel } from '@/lib/client/format'
 import { openContextMenu } from './ContextMenu'
+import { callMenuItems } from './callMenu'
 import { promptDialog } from './ConfirmDialog'
 import {
   Dialog,
@@ -150,12 +151,15 @@ export function FriendsView() {
     }
   }
 
-  /** Kebab or right-click on a friend: nickname, temporary window, remove. */
+  /** Kebab or right-click on a friend: call, nickname, temporary window, remove. */
   function friendMenu(e: React.MouseEvent, friend: FriendSummary) {
     const title = friend.nickname || friend.user.displayName || friend.user.username
+    const callItems = callMenuItems({ id: friend.user.id, username: friend.user.username, displayName: friend.user.displayName })
     openContextMenu(
       e,
       [
+        ...callItems,
+        ...(callItems.length > 0 ? [{ kind: 'separator' as const }] : []),
         {
           label: 'set nickname',
           icon: Tag,
@@ -237,7 +241,7 @@ export function FriendsView() {
   }
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-app-chat view-in">
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-app-chat view-in">
       {/* header */}
       <div className="h-12 shrink-0 border-b border-white/10 flex items-center gap-3 px-4">
         <span className="text-sm font-bold tracking-tight">Friends</span>

@@ -35,6 +35,7 @@ const USER_SELECT = {
   avatarColor: true,
   bio: true,
   role: true,
+  siteAdmin: true,
   customStatus: true,
   pronouns: true,
   presence: true,
@@ -101,6 +102,8 @@ export async function POST(req: NextRequest) {
         passwordHash: await hashPassword(password),
         avatarColor: pickColor(username),
         role,
+        // the first account on a fresh install owns the admin panel too
+        siteAdmin: userCount === 0,
       },
       select: USER_SELECT,
     })

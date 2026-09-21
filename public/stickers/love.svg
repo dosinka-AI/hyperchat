@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#e3d2ff"/>
+      <stop offset="100%" stop-color="#9b6fd6"/>
+    </radialGradient>
+  </defs>
+  <!-- body -->
+  <ellipse cx="80" cy="92" rx="52" ry="46" fill="url(#glow)" stroke="#5b3a86" stroke-width="3"/>
+  <!-- ears -->
+  <path d="M38 60 L30 28 L62 46 Z" fill="url(#glow)" stroke="#5b3a86" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M122 60 L130 28 L98 46 Z" fill="url(#glow)" stroke="#5b3a86" stroke-width="3" stroke-linejoin="round"/>
+  <!-- heart eyes -->
+  <path d="M62 78 c-3 -6 -12 -5 -12 2 c0 6 8 9 12 13 c4 -4 12 -7 12 -13 c0 -7 -9 -8 -12 -2 Z" fill="#ff5f7e" stroke="#a83250" stroke-width="2"/>
+  <path d="M98 78 c-3 -6 -12 -5 -12 2 c0 6 8 9 12 13 c4 -4 12 -7 12 -13 c0 -7 -9 -8 -12 -2 Z" fill="#ff5f7e" stroke="#a83250" stroke-width="2"/>
+  <!-- sweet smile -->
+  <path d="M70 104 q10 8 20 0" fill="none" stroke="#3d2560" stroke-width="4" stroke-linecap="round"/>
+  <!-- floating hearts -->
+  <path d="M138 52 c-2 -4 -8 -3 -8 1 c0 4 5 6 8 9 c3 -3 8 -5 8 -9 c0 -4 -6 -5 -8 -1 Z" fill="#ff9db2" opacity="0.9"/>
+  <path d="M22 66 c-1.5 -3 -6 -2 -6 1 c0 3 4 5 6 7 c2 -2 6 -4 6 -7 c0 -3 -4.5 -4 -6 -1 Z" fill="#ff9db2" opacity="0.7"/>
+</svg>

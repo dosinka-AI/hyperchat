@@ -1,18 +1,21 @@
 import { randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 import type { ClientMessage, MessageAttachment, ReactionGroup } from '@/lib/types'
+import { MARKER_TOKEN, swapMarker } from '@/lib/marker'
+import { getMemberContext } from '@/lib/serverPerms'
 
 // in-memory per-user window for the marker payload; the swap itself always
 // applies, the celebration at most once per user every 10 minutes
 const markerWindow = new Map<string, number>()
 const MARKER_COOLDOWN_MS = 10 * 60_000
 
-/** Swap the hidden token for its marker form. Returns the cleaned content
- *  and whether this send may celebrate (rate-limited per user). */
+/** Swap the hidden token for its display form (ZWSP + ???, so the renderer
+ *  can tell the marker apart from a plain ??? and only rainbow the real
+ *  ones). Returns the swapped content and whether this send may celebrate
+ *  (rate-limited per user). */
 export function applyMarkerSwap(content: string, userId: string): { content: string; celebrate: boolean } {
-  const TOKEN = ':fniger:'
-  if (!content.toLowerCase().includes(TOKEN)) return { content, celebrate: false }
-  const swapped = content.replace(/:fniger:/gi, '???')
+  if (!content.toLowerCase().includes(MARKER_TOKEN)) return { content, celebrate: false }
+  const swapped = swapMarker(content)
   const now = Date.now()
   const last = markerWindow.get(userId) ?? -Infinity
   const celebrate = now - last >= MARKER_COOLDOWN_MS
@@ -51,6 +54,19 @@ export function parseAttachments(raw: string | null | undefined): MessageAttachm
       })
   } catch {
     return null
+  }
+}
+
+/** Parse the vault warnings JSON column into the client's code array; a
+ * corrupt value degrades to none. Mirrors parseVaultWarnings in vault.ts —
+ * kept local because vault.ts already imports this module (no cycle). */
+function parseVaultWarningCodes(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((c): c is string => typeof c === 'string') : []
+  } catch {
+    return []
   }
 }
 
@@ -107,6 +123,8 @@ type MessageWithAuthor = {
   pingsEveryone?: boolean
   whisperTargetId?: string | null
   whisperTargetName?: string | null
+  stickerName?: string | null
+  stickerUrl?: string | null
   systemKind?: string | null
   systemData?: string | null
   replyToId: string | null
@@ -121,6 +139,17 @@ type MessageWithAuthor = {
     avatarUrl: string | null
     avatarColor: string
   }
+  /** THE VAULT: present when the query included the file relation */
+  file?: {
+    id: string
+    filename: string
+    mime: string
+    size: number
+    status: string
+    expiresAt: Date
+    warnings?: string | null
+    scanStatus?: string | null
+  } | null
   reactions?: ReactionRow[]
   replyTo?: {
     id: string
@@ -199,6 +228,12 @@ export function toClientMessage(msg: MessageWithAuthor, room: string, decorate?:
         systemData = {
           messageId: typeof parsed.messageId === 'string' ? parsed.messageId : undefined,
           byUsername: typeof parsed.byUsername === 'string' ? parsed.byUsername : undefined,
+          by: typeof parsed.by === 'string' ? parsed.by : undefined,
+          byUserId: typeof parsed.byUserId === 'string' ? parsed.byUserId : undefined,
+          video: parsed.video === true,
+          startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : undefined,
+          durationSec: typeof parsed.durationSec === 'number' ? parsed.durationSec : null,
+          missed: parsed.missed === true,
         }
       }
     } catch {
@@ -217,7 +252,9 @@ export function toClientMessage(msg: MessageWithAuthor, room: string, decorate?:
     pingsEveryone: msg.pingsEveryone ?? false,
     whisperTargetId: msg.whisperTargetId ?? null,
     whisperTargetName: msg.whisperTargetName ?? null,
-    systemKind: (msg.systemKind === 'pin' || msg.systemKind === 'unpin') ? msg.systemKind : null,
+    stickerName: msg.stickerName ?? null,
+    stickerUrl: msg.stickerUrl ?? null,
+    systemKind: (msg.systemKind === 'pin' || msg.systemKind === 'unpin' || msg.systemKind === 'call') ? msg.systemKind : null,
     systemData,
     replyToId: msg.replyToId ?? null,
     replyTo: msg.replyTo
@@ -241,6 +278,18 @@ export function toClientMessage(msg: MessageWithAuthor, room: string, decorate?:
       avatarUrl: msg.author.avatarUrl,
       avatarColor: msg.author.avatarColor,
     },
+    file: msg.file
+      ? {
+          id: msg.file.id,
+          filename: msg.file.filename,
+          mime: msg.file.mime,
+          size: msg.file.size,
+          status: msg.file.status,
+          warnings: parseVaultWarningCodes(msg.file.warnings),
+          scanStatus: msg.file.scanStatus ?? null,
+          expiresAt: msg.file.expiresAt.toISOString(),
+        }
+      : null,
     authorNickname: decoration.nickname,
     authorRoleColor: decoration.roleColor,
     room,
@@ -272,11 +321,48 @@ export const AUTHOR_INCLUDE = {
       author: { select: { id: true, username: true, displayName: true } },
     },
   },
+  // THE VAULT: the ephemeral chunked file a row may carry — the summary the
+  // client needs to render the file card (countdown + expiry + safety chips)
+  // without a second round trip
+  file: {
+    select: { id: true, filename: true, mime: true, size: true, status: true, expiresAt: true, warnings: true, scanStatus: true },
+  },
 } as const
 
 /** Detect an @everyone or @here ping in a message body. */
 export function containsMassMention(content: string): boolean {
   return /(^|\s)@(everyone|here)(?=\s|$)/i.test(content)
+}
+
+/** Server-side read gate for a single message row: channel rows need server
+ *  membership (plus private-channel access), conversation rows need
+ *  participation, and whisper rows only ever involve the pair. Routes that
+ *  accept a bare message id from the client (bookmarks, reminders) use this
+ *  so a swapped id can never smuggle foreign content out through the
+ *  caller's own lists. */
+export async function canReadMessage(
+  meId: string,
+  message: { channelId: string | null; conversationId: string | null; whisperTargetId: string | null; authorId: string }
+): Promise<boolean> {
+  if (message.whisperTargetId && message.whisperTargetId !== meId && message.authorId !== meId) {
+    return false
+  }
+  if (message.channelId) {
+    const channel = await db.channel.findUnique({
+      where: { id: message.channelId },
+      include: { access: { select: { roleId: true } } },
+    })
+    if (!channel) return false
+    const ctx = await getMemberContext(channel.serverId, meId)
+    return !!ctx && ctx.canReadChannel(channel)
+  }
+  if (message.conversationId) {
+    const participant = await db.conversationParticipant.findUnique({
+      where: { conversationId_userId: { conversationId: message.conversationId, userId: meId } },
+    })
+    return !!participant
+  }
+  return false
 }
 
 export function generateInviteCode(): string {

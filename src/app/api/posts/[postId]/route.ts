@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { findForumPost, forumPostMeta } from '@/lib/forum'
+import { findForumPost, forumPostMeta, resolvePostTags, splitTagCsv } from '@/lib/forum'
 import { channelRoom, emitToRooms, emitToAll, forbidden, notFound, serverError, serverRoom, unauthorized } from '@/lib/realtime'
 import { getMemberContext } from '@/lib/serverPerms'
 import { hasPerm, PERM } from '@/lib/perm'
@@ -16,6 +16,7 @@ async function postSummaryFor(post: NonNullable<Awaited<ReturnType<typeof findFo
     title: post.title,
     pinned: post.pinned,
     locked: post.locked,
+    tags: splitTagCsv(post.tags),
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
     firstMessageId: post.firstMessageId,
@@ -105,7 +106,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const isAuthor = post.authorId === me.id
 
     const body = await req.json()
-    const data: { title?: string; pinned?: boolean; locked?: boolean } = {}
+    const data: { title?: string; pinned?: boolean; locked?: boolean; tags?: string } = {}
 
     if (typeof body.title === 'string') {
       const title = body.title.trim().slice(0, 200)
@@ -124,6 +125,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       if (!canMod) return forbidden('Only moderators can lock posts.')
       if (typeof body.locked !== 'boolean') return NextResponse.json({ error: 'locked must be true or false.' }, { status: 400 })
       data.locked = body.locked
+    }
+    // tags ride the same author-or-mod edit as the title: every name must
+    // exist as a ForumTag of this channel
+    if (body.tags !== undefined) {
+      if (!isAuthor && !canMod) return forbidden('You cannot edit this post.')
+      const tagRes = await resolvePostTags(post.channelId, body.tags)
+      if (!tagRes.ok) return NextResponse.json({ error: tagRes.error }, { status: 400 })
+      data.tags = tagRes.names.join(',')
     }
 
     const updated = await db.forumPost.update({ where: { id: postId }, data, include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true, avatarColor: true } } } })

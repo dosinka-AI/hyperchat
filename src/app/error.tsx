@@ -12,7 +12,7 @@ export default function Error({
   reset: () => void
 }) {
   useEffect(() => {
-    console.error('[HyperChat] render error:', error)
+    console.error('[Hyperion] render error:', error)
   }, [error])
 
   return (
@@ -23,7 +23,7 @@ export default function Error({
         </div>
         <h1 className="mt-4 text-xl font-extrabold tracking-tight">Something broke</h1>
         <p className="mt-2 text-sm text-white/60 leading-relaxed">
-          HyperChat hit an unexpected error. Your messages and servers are safe on the server.
+          Hyperion hit an unexpected error. Your messages and servers are safe on the server.
           Reload the page, or try again below.
         </p>
         <div className="mt-6 flex items-center justify-center gap-2">

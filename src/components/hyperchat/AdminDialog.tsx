@@ -168,7 +168,7 @@ export function AdminDialog({ open, onOpenChange }: { open: boolean; onOpenChang
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/10 shrink-0">
           <Shield className="size-4 text-hyper shrink-0" />
           <div className="min-w-0">
-            <h2 className="text-sm font-bold tracking-tight">HyperChat admin</h2>
+            <h2 className="text-sm font-bold tracking-tight">Hyperion admin</h2>
           </div>
           {loading ? (
             <Spinner className="size-3.5 text-muted-foreground" />
@@ -214,8 +214,8 @@ export function AdminDialog({ open, onOpenChange }: { open: boolean; onOpenChang
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm font-medium truncate">{u.username}</span>
                         {u.role === 'ADMIN' && (
-                          <span className="text-hyper border border-hyper/40 px-1.5 rounded-sm text-[10px] font-bold tracking-wide shrink-0" title="administers the entire HyperChat platform">
-                            HyperChat admin
+                          <span className="text-hyper border border-hyper/40 px-1.5 rounded-sm text-[10px] font-bold tracking-wide shrink-0" title="administers the entire Hyperion platform">
+                            Hyperion admin
                           </span>
                         )}
                         {banned && (

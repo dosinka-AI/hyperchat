@@ -1,12 +1,12 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/lib/client/store'
 import { relativeTime } from '@/lib/client/format'
 import { Avatar } from './Avatar'
+import { UserPanel } from './UserPanel'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   DndContext,
   PointerSensor,
@@ -26,11 +26,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Hash, ChevronDown, UserPlus, MessageSquarePlus, LogOut, Plus, AtSign, Settings, X, FolderPlus, BellOff, Bell, UserCheck, UserX, Clock, Lock, Pin, Bookmark, CalendarClock, Circle, Minus, Moon, EyeOff, Focus, Pencil, Users, UserRound, Check, GripVertical, Trash2, Search, Volume2, MessagesSquare, PhoneOff, Mic, MicOff, Headphones, HeadphoneOff } from 'lucide-react'
+import { Hash, ChevronDown, UserPlus, MessageSquarePlus, LogOut, Plus, AtSign, Settings, X, FolderPlus, BellOff, Bell, UserCheck, UserX, Clock, Lock, Pin, Bookmark, CalendarClock, Circle, Minus, Moon, EyeOff, Focus, Pencil, Users, UserRound, Check, GripVertical, Trash2, Search, Volume2, MessagesSquare, Phone, PhoneOff, Mic, MicOff, Headphones, HeadphoneOff } from 'lucide-react'
 import { sounds } from '@/lib/client/sounds'
+import { roomLabelOf } from '@/lib/client/call-space'
 import { PERM } from '@/lib/perm'
 import type { ChannelSummary, ConversationSummary, FriendSummary, UserPresenceChoice } from '@/lib/types'
 import { openContextMenu } from './ContextMenu'
+import { callMenuItems } from './callMenu'
 import { awayForLabel } from './MessageList'
 import { confirmDialog, promptDialog } from './ConfirmDialog'
 import { ApiError } from '@/lib/client/api'
@@ -197,6 +199,7 @@ export function ChannelSidebar({
   const conversations = useChatStore((s) => s.conversations)
   const onlineUserIds = useChatStore((s) => s.onlineUserIds)
   const presenceStatuses = useChatStore((s) => s.presenceStatuses)
+  const liveCalls = useChatStore((s) => s.liveCalls)
   const awaySince = useChatStore((s) => s.awaySince)
   const channelUnread = useChatStore((s) => s.channelUnread)
   const connected = useChatStore((s) => s.connected)
@@ -206,8 +209,6 @@ export function ChannelSidebar({
   const deleteServer = useChatStore((s) => s.deleteServer)
   const hideConversation = useChatStore((s) => s.hideConversation)
   const pinConversation = useChatStore((s) => s.pinConversation)
-  const doLogout = useChatStore((s) => s.doLogout)
-  const setAccountOpen = useChatStore((s) => s.setAccountOpen)
   const openProfile = useChatStore((s) => s.openProfile)
   const friends = useChatStore((s) => s.friends)
   const incomingRequests = useChatStore((s) => s.incomingRequests)
@@ -217,14 +218,11 @@ export function ChannelSidebar({
   const renameGroup = useChatStore((s) => s.renameGroup)
   const leaveGroup = useChatStore((s) => s.leaveGroup)
   const addGroupMember = useChatStore((s) => s.addGroupMember)
-  const markRead = useChatStore((s) => s.markRead)
+  const maybeMarkRead = useChatStore((s) => s.maybeMarkRead)
   const { toast } = useToast()
   const mutedScopes = useChatStore((s) => s.mutedScopes)
   const toggleMute = useChatStore((s) => s.toggleMute)
   const channelMentions = useChatStore((s) => s.channelMentions)
-  const setMyPresence = useChatStore((s) => s.setMyPresence)
-  const updateProfile = useChatStore((s) => s.updateProfile)
-  const setProfileEditorOpen = useChatStore((s) => s.setProfileEditorOpen)
   const reorderChannels = useChatStore((s) => s.reorderChannels)
   const reorderCategories = useChatStore((s) => s.reorderCategories)
   const renameCategory = useChatStore((s) => s.renameCategory)
@@ -232,44 +230,13 @@ export function ChannelSidebar({
   const voiceConnected = useChatStore((s) => s.voiceConnected)
   const voiceSelf = useChatStore((s) => s.voiceSelf)
   const voiceParticipants = useChatStore((s) => s.voiceParticipants)
+  const switchVoiceSpace = useChatStore((s) => s.switchVoiceSpace)
   const joinVoice = useChatStore((s) => s.joinVoice)
   const leaveVoice = useChatStore((s) => s.leaveVoice)
   const toggleVoiceMute = useChatStore((s) => s.toggleVoiceMute)
   const toggleVoiceDeafen = useChatStore((s) => s.toggleVoiceDeafen)
   const selectServer = useChatStore((s) => s.selectServer)
 
-  // user panel popover: open state + status quote draft
-  const [panelOpen, setPanelOpen] = useState(false)
-  const [statusDraft, setStatusDraft] = useState('')
-  // while the quote input is focused, nothing may re-seed the draft (a
-  // store refresh mid-typing used to wipe it). state, not a ref, so the
-  // render-phase seed below can read it legally
-  const [statusFocused, setStatusFocused] = useState(false)
-
-  // seed the quote draft from the live profile each time the popover opens
-  // (render-phase adjust, the same pattern the message list uses)
-  const [panelSeed, setPanelSeed] = useState<string | null>(null)
-  if (panelOpen && panelSeed === null && !statusFocused) {
-    const v = me?.customStatus ?? ''
-    setPanelSeed(v)
-    setStatusDraft(v)
-  } else if (!panelOpen && panelSeed !== null) {
-    setPanelSeed(null)
-  }
-
-  /** Save the status quote straight from the panel popover. */
-  async function saveStatusQuote() {
-    if (!me) return
-    const next = statusDraft.trim() || null
-    if (next === (me.customStatus ?? null)) return
-    try {
-      await updateProfile({ customStatus: next })
-      sounds.play('lightTick')
-    } catch {
-      sounds.play('error')
-      toast({ title: 'could not save status' })
-    }
-  }
   const bookmarks = useChatStore((s) => s.bookmarks)
   const scheduled = useChatStore((s) => s.scheduled)
   const setSavedOpen = useChatStore((s) => s.setSavedOpen)
@@ -338,7 +305,7 @@ export function ChannelSidebar({
 
   /** Second-level menu: pick one of my servers, its invite link lands in
    *  the composer of this conversation (and the clipboard). The exact
-   *  "hyperchat.gg/<code>" text is what the invite embed renderer matches. */
+   *  "hyperion.gg/<code>" text is what the invite embed renderer matches. */
   function openInviteServersMenu(e: React.MouseEvent, conversationId: string) {
     const state = useChatStore.getState()
     openContextMenu(
@@ -352,7 +319,7 @@ export function ChannelSidebar({
           label: s.name,
           icon: Users,
           onSelect: () => {
-            const link = `hyperchat.gg/${s.inviteCode}`
+            const link = `hyperion.gg/${s.inviteCode}`
             sounds.play('midTick')
             void state.selectConversation(conversationId)
             state.requestInsert(`conversation:${conversationId}`, link)
@@ -371,6 +338,7 @@ export function ChannelSidebar({
     openContextMenu(
       e,
       [
+        ...callMenuItems({ id: c.otherUser.id, username: c.otherUser.username, displayName: c.otherUser.displayName }),
         {
           label: 'profile',
           icon: UserRound,
@@ -389,7 +357,7 @@ export function ChannelSidebar({
           icon: Check,
           onSelect: () => {
             sounds.play('lightTick')
-            void markRead(`conversation:${c.id}`)
+            maybeMarkRead(`conversation:${c.id}`)
           },
         },
         {
@@ -571,7 +539,7 @@ export function ChannelSidebar({
             onNavigated()
           }}
           className={cn(
-            'flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-sm text-sm min-w-0 transition-colors',
+            'flex-1 flex items-center gap-1.5 px-2 py-1.5 max-md:py-2.5 rounded-sm text-sm min-w-0 transition-[color,background-color,transform] duration-150 ease-out max-md:hover:translate-x-0 hover:translate-x-0.5',
             active
               ? 'text-foreground font-semibold'
               : mentions > 0
@@ -598,8 +566,9 @@ export function ChannelSidebar({
           )}
           {unread > 0 && !active && (
             <span
+              key={unread}
               className={cn(
-                'shrink-0 min-w-4 h-4 px-1 text-[9px] font-bold grid place-items-center rounded-sm',
+                'badge-bump shrink-0 min-w-4 h-4 px-1 text-[9px] font-bold grid place-items-center rounded-sm',
                 mentions > 0
                   ? 'bg-hyper text-white mention-badge'
                   : muted
@@ -646,11 +615,13 @@ export function ChannelSidebar({
           onClick={() => {
             if (!server) return
             void selectChannel(channel.id)
-            if (!connectedHere) void joinVoice(channel.id, server.id)
+            // switchVoiceSpace leaves any current channel cleanly (no
+            // double join, no leaked mic) and keeps camera/screen alive
+            if (!connectedHere) void switchVoiceSpace(channel.id, server.id)
             onNavigated()
           }}
           className={cn(
-            'flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-sm text-sm min-w-0 transition-colors',
+            'flex-1 flex items-center gap-1.5 px-2 py-1.5 max-md:py-2.5 rounded-sm text-sm min-w-0 transition-[color,background-color,transform] duration-150 ease-out max-md:hover:translate-x-0 hover:translate-x-0.5',
             active ? 'text-foreground font-semibold' : 'text-muted-foreground hover:text-foreground'
           )}
           aria-current={active ? 'page' : undefined}
@@ -661,10 +632,27 @@ export function ChannelSidebar({
             <Volume2 className="size-4 shrink-0 opacity-60" aria-hidden="true" />
           )}
           <span className="truncate flex-1 text-left">{channel.name}</span>
+          {/* voice channels carry text chat too: new messages get the same
+              unread pill as text channels, sized to sit beside live avatars */}
+          {(channelUnread[channel.id] ?? 0) > 0 && !active && (
+            <span
+              key={channelUnread[channel.id]}
+              className="badge-bump shrink-0 min-w-4 h-4 px-1 text-[9px] font-bold grid place-items-center rounded-sm bg-white text-black"
+            >
+              {(channelUnread[channel.id] ?? 0) > 99 ? '99+' : channelUnread[channel.id]}
+            </span>
+          )}
           {live.length > 0 && (
             <span className="shrink-0 flex items-center -space-x-1.5">
               {shown.map((p) => (
-                <span key={p.userId} className="rounded-full ring-2 ring-app-sidebar">
+                <span
+                  key={p.userId}
+                  className={cn(
+                    'rounded-full ring-2 ring-app-sidebar transition-[box-shadow,transform] duration-100',
+                    p.speaking && !p.muted && 'ring-hyper/90 scale-[1.12] speaking-soft'
+                  )}
+                  title={p.speaking && !p.muted ? `${p.displayName || p.username} is speaking` : p.displayName || p.username}
+                >
                   <Avatar name={p.username} color={p.avatarColor} url={p.avatarUrl} size="sm" />
                 </span>
               ))}
@@ -680,8 +668,72 @@ export function ChannelSidebar({
     )
   }
 
+  /** live call channels spun up inside a voice channel (synthetic ids
+   *  "<channelId>~<slug>"): indented sub-rows with a live dot and their own
+   *  avatar stack. They only exist while someone is inside, so the rows
+   *  appear and vanish with real activity. Clicking hops you straight in. */
+  const renderCallChannels = (channel: ChannelSummary) =>
+    Object.entries(voiceParticipants)
+      .filter(([id, list]) => id.startsWith(channel.id + '~') && list.length > 0)
+      .map(([id, list]) => {
+        const connectedHere = voiceConnected?.channelId === id
+        const label = roomLabelOf(id) || 'call channel'
+        const shown = list.slice(0, 3)
+        const overflow = list.length - shown.length
+        return (
+          <div
+            key={id}
+            className={cn(
+              'group relative flex items-center rounded-sm transition-colors',
+              connectedHere ? 'bg-app-raise' : 'hover:bg-app-raise/60'
+            )}
+          >
+            <button
+              onClick={() => {
+                if (!server) return
+                sounds.play('lightTick')
+                void selectChannel(channel.id)
+                if (!connectedHere) void switchVoiceSpace(id, server.id)
+                onNavigated()
+              }}
+              className={cn(
+                'flex-1 flex items-center gap-1.5 pl-7 pr-2 py-1 rounded-sm text-xs min-w-0 transition-[color,background-color,transform] duration-150 ease-out hover:translate-x-0.5',
+                connectedHere ? 'text-foreground font-semibold' : 'text-muted-foreground hover:text-foreground'
+              )}
+              aria-label={`call channel ${label}, ${list.length} ${list.length === 1 ? 'person' : 'people'}`}
+              title={`call channel · ${list.length} ${list.length === 1 ? 'person' : 'people'}`}
+            >
+              <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
+                <span className="absolute inline-flex size-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+                <span className="relative inline-flex size-full rounded-full bg-emerald-400" />
+              </span>
+              <span className="truncate">{label}</span>
+              <span className="shrink-0 flex items-center -space-x-1.5 ml-auto">
+                {shown.map((p) => (
+                  <span
+                    key={p.userId}
+                    className={cn(
+                      'rounded-full ring-2 ring-app-sidebar transition-[box-shadow,transform] duration-100',
+                      p.speaking && !p.muted && 'ring-hyper/90 scale-[1.12] speaking-soft'
+                    )}
+                    title={p.speaking && !p.muted ? `${p.displayName || p.username} is speaking` : p.displayName || p.username}
+                  >
+                    <Avatar name={p.username} color={p.avatarColor} url={p.avatarUrl} size="sm" />
+                  </span>
+                ))}
+                {overflow > 0 && (
+                  <span className="size-5 rounded-full ring-2 ring-app-sidebar bg-app-raise grid place-items-center text-[8px] font-bold text-muted-foreground">
+                    +{overflow}
+                  </span>
+                )}
+              </span>
+            </button>
+          </div>
+        )
+      })
+
   return (
-    <div className="w-full h-full bg-app-sidebar flex flex-col border-r border-white/10">
+    <div className="w-full h-full bg-app-sidebar border-r border-white/10 flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0">
       {server ? (
         <>
           <div className="h-12 px-3 flex items-center border-b border-white/10 shrink-0">
@@ -775,7 +827,14 @@ export function ChannelSidebar({
                     </button>
                   )}
                 </div>
-                <div className="space-y-0.5">{voiceChannels.map(renderVoiceChannel)}</div>
+                <div className="space-y-0.5">
+                  {voiceChannels.map((c) => (
+                    <Fragment key={c.id}>
+                      {renderVoiceChannel(c)}
+                      {renderCallChannels(c)}
+                    </Fragment>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1148,7 +1207,7 @@ export function ChannelSidebar({
                           )}
                         </span>
                         {c.unreadCount > 0 && !active && (
-                          <span className="shrink-0 min-w-4 h-4 px-1 bg-hyper text-[9px] font-bold text-white grid place-items-center rounded-sm">
+                          <span key={c.unreadCount} className="badge-bump shrink-0 min-w-4 h-4 px-1 bg-hyper text-[9px] font-bold text-white grid place-items-center rounded-sm">
                             {c.unreadCount > 99 ? '99+' : c.unreadCount}
                           </span>
                         )}
@@ -1188,6 +1247,7 @@ export function ChannelSidebar({
 
                 // ---- DM rows stay exactly as they are ----
                 const online = !!onlineUserIds[c.otherUser.id]
+                const dmLiveCall = liveCalls[c.id]
                 return (
                   <div
                     key={c.id}
@@ -1224,6 +1284,16 @@ export function ChannelSidebar({
                         <span className="flex items-center gap-1">
                           {c.pinned && <Pin className="size-3 shrink-0 text-muted-foreground/80" aria-label="pinned" />}
                           <span className="truncate">{c.otherUser.displayName || c.otherUser.username}</span>
+                          {dmLiveCall && (
+                            <span
+                              className="ml-auto shrink-0 flex items-center gap-1 text-emerald-300"
+                              title="a call is live in this conversation"
+                              aria-label="call in progress"
+                            >
+                              <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
+                              <Phone className="size-3" aria-hidden="true" />
+                            </span>
+                          )}
                         </span>
                         {c.lastMessage && !active && (
                           <span className="block truncate text-[11px] text-muted-foreground/80">
@@ -1233,7 +1303,7 @@ export function ChannelSidebar({
                         )}
                       </span>
                       {c.unreadCount > 0 && !active && (
-                        <span className="shrink-0 min-w-4 h-4 px-1 bg-hyper text-[9px] font-bold text-white grid place-items-center rounded-sm">
+                        <span key={c.unreadCount} className="badge-bump shrink-0 min-w-4 h-4 px-1 bg-hyper text-[9px] font-bold text-white grid place-items-center rounded-sm">
                           {c.unreadCount > 99 ? '99+' : c.unreadCount}
                         </span>
                       )}
@@ -1339,297 +1409,11 @@ export function ChannelSidebar({
         </div>
       )}
 
-      {/* user panel: the whole area opens a medium preview of your own
-          profile card, with the status dropdown and status quote inline */}
-      <div className="h-[56px] bg-app-rail/50 px-2 flex items-center gap-2 border-t border-white/10 shrink-0">
-        {me && (
-          <>
-            <Popover
-              open={panelOpen}
-              onOpenChange={(next) => {
-                setPanelOpen(next)
-                if (next) {
-                  if (!statusFocused) setStatusDraft(me.customStatus ?? '')
-                } else if (statusFocused || statusDraft.trim() !== (me.customStatus ?? '')) {
-                  // closing the panel commits whatever was typed: blur can
-                  // miss when the input unmounts, so the draft would be lost
-                  void saveStatusQuote()
-                }
-              }}
-            >
-              <PopoverTrigger asChild>
-                <button
-                  className="flex items-center gap-2 flex-1 min-w-0 h-full px-1.5 -mx-1.5 rounded-sm hover:bg-white/[0.04] active:bg-white/[0.07] transition-colors text-left"
-                  aria-label="your profile and status"
-                >
-                  <Avatar
-                    name={me.username}
-                    color={me.avatarColor}
-                    url={me.avatarUrl}
-                    size="sm"
-                    status={connected ? (me.presence === 'invisible' ? 'offline' : me.presence) : 'offline'}
-                    showDot
-                  />
-                  <div className="min-w-0 flex-1 leading-tight">
-                    <p className="text-[13px] font-semibold truncate">{me.displayName || me.username}</p>
-                    <p className="text-[11px] truncate flex items-center gap-1">
-                      {me.customStatus ? (
-                        <span className="text-foreground/75 truncate">{me.customStatus}</span>
-                      ) : (
-                        <span className="text-muted-foreground">
-                          {presenceLabel(me.presence, connected)}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <Settings className="size-4 text-muted-foreground shrink-0 opacity-60" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                side="top"
-                align="start"
-                className="w-[21rem] p-0 rounded-sm border border-white/10 bg-app-sidebar overflow-hidden shadow-xl"
-                aria-describedby={undefined}
-              >
-                {/* mini profile preview: the same card proportions the other
-                    profile views use, so this one finally matches them */}
-                <div className="relative">
-                  <div
-                    className="h-20 relative overflow-hidden"
-                    style={
-                      !me.bannerUrl && me.bannerColor
-                        ? { backgroundColor: me.bannerColor }
-                        : !me.bannerUrl
-                          ? { backgroundColor: '#1c1c1c' }
-                          : undefined
-                    }
-                  >
-                    {me.bannerUrl && (
-                      <img src={me.bannerUrl} alt="" className="absolute inset-0 size-full object-cover" draggable={false} />
-                    )}
-                  </div>
-                  <div className="absolute left-3.5 top-[52px] rounded-full ring-2 ring-app-sidebar">
-                    <Avatar
-                      name={me.username}
-                      color={me.avatarColor}
-                      url={me.avatarUrl}
-                      size="mx"
-                      status={connected ? (me.presence === 'invisible' ? 'offline' : me.presence) : 'offline'}
-                      showDot
-                    />
-                  </div>
-                  <div className="absolute left-[4.5rem] top-[58px] w-[calc(100%-5.25rem)]">
-                    <input
-                      value={statusDraft}
-                      onChange={(e) => setStatusDraft(e.target.value)}
-                      onFocus={() => setStatusFocused(true)}
-                      onBlur={() => {
-                        setStatusFocused(false)
-                        if (statusDraft.trim() !== (me.customStatus ?? '')) void saveStatusQuote()
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') void saveStatusQuote()
-                      }}
-                      placeholder="what are you thinking?"
-                      maxLength={80}
-                      aria-label="your status quote"
-                      className={cn(
-                        'status-bubble border px-2.5 py-1.5 text-[11px] outline-none w-full transition-colors placeholder:text-muted-foreground/60',
-                        statusDraft.trim()
-                          ? 'border-white/10 bg-app-raise text-foreground/90 focus:border-hyper/50'
-                          : 'border-dashed border-white/15 bg-app-raise/60 text-foreground/80 focus:border-hyper/40'
-                      )}
-                    />
-                  </div>
-                </div>
-                <div className="pt-8 px-3.5 pb-3.5 space-y-2.5">
-                  <div>
-                    <p className="text-[15px] font-bold tracking-tight truncate">{me.displayName || me.username}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      @{me.username}
-                      {me.pronouns && <span className="text-muted-foreground/80"> · {me.pronouns}</span>}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      sounds.play('lightTick')
-                      void openProfile(me.username)
-                      setPanelOpen(false)
-                    }}
-                    className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm border border-white/10 text-xs font-semibold hover:border-white/25 hover:bg-app-raise/60 transition-colors"
-                  >
-                    <UserRound className="size-3.5" />
-                    view profile
-                  </button>
-                  {me.bio && (
-                    <p className="text-[11.5px] text-foreground/75 leading-snug line-clamp-2 break-words">{me.bio}</p>
-                  )}
-
-                  {/* status dropdown */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm border border-white/10 bg-app-raise text-xs hover:border-white/25 transition-colors"
-                        aria-label="change your status"
-                      >
-                        <StatusGlyph status={me.presence} />
-                        <span className="flex-1 text-left">
-                          {connected ? presenceChoiceLabel(me.presence) : 'reconnecting'}
-                        </span>
-                        <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent side="top" align="start" className="w-52 rounded-sm">
-                      <DropdownMenuItem
-                        onClick={() => {
-                          sounds.play('lightTick')
-                          void setMyPresence('online')
-                        }}
-                        className="gap-2 py-1.5"
-                      >
-                        <span className="size-2.5 rounded-full bg-online shrink-0 status-breathe" />
-                        <span className="flex-1">Online</span>
-                        {me.presence === 'online' && <span className="text-[10px] text-muted-foreground">current</span>}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          sounds.play('lightTick')
-                          void setMyPresence('idle')
-                        }}
-                        className="gap-2 py-1.5"
-                      >
-                        <span className="relative size-2.5 rounded-full bg-idle shrink-0">
-                          <span className="absolute -top-[30%] -right-[25%] w-[70%] h-[70%] rounded-full bg-popover" />
-                        </span>
-                        <span className="flex-1">Away / Idle</span>
-                        {me.presence === 'idle' && <span className="text-[10px] text-muted-foreground">current</span>}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          sounds.play('lightTick')
-                          void setMyPresence('busy')
-                        }}
-                        className="gap-2 py-1.5"
-                      >
-                        <span className="relative size-2.5 rounded-full bg-busy shrink-0">
-                          <span className="absolute left-1/2 bottom-1/2 w-[1.5px] h-[32%] -translate-x-1/2 bg-white/95 rounded-full" />
-                          <span className="absolute top-1/2 left-1/2 w-[32%] h-[1.5px] -translate-y-1/2 bg-white/95 rounded-full" />
-                        </span>
-                        <span className="flex-1">Busy</span>
-                        {me.presence === 'busy' && <span className="text-[10px] text-muted-foreground">current</span>}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          sounds.play('lightTick')
-                          void setMyPresence('dnd')
-                        }}
-                        className="gap-2 py-1.5"
-                      >
-                        <span className="relative size-2.5 rounded-full bg-dnd shrink-0 grid place-items-center">
-                          <span className="w-[55%] h-[2px] rounded-full bg-popover" />
-                        </span>
-                        <span className="flex-1">do not disturb</span>
-                        {me.presence === 'dnd' && <span className="text-[10px] text-muted-foreground">current</span>}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          sounds.play('lightTick')
-                          void setMyPresence('invisible')
-                        }}
-                        className="gap-2 py-1.5"
-                      >
-                        <span className="size-2.5 rounded-full bg-offline shrink-0" />
-                        <span className="flex-1">Invisible</span>
-                        {me.presence === 'invisible' && <span className="text-[10px] text-muted-foreground">current</span>}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  {/* actions */}
-                  <div className="flex gap-1.5 pt-0.5">
-                    <button
-                      onClick={() => {
-                        sounds.play('midTick')
-                        setProfileEditorOpen(true)
-                        setPanelOpen(false)
-                      }}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm border border-white/10 text-xs font-semibold hover:border-white/25 transition-colors"
-                    >
-                      <Pencil className="size-3.5" />
-                      Edit profile
-                    </button>
-                    <button
-                      onClick={() => {
-                        sounds.play('midTick')
-                        setAccountOpen(true)
-                        setPanelOpen(false)
-                      }}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm border border-white/10 text-xs font-semibold hover:border-white/25 transition-colors"
-                    >
-                      <Settings className="size-3.5" />
-                      Settings
-                    </button>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-            <button
-              onClick={() => void doLogout()}
-              className="p-2 rounded-sm text-muted-foreground hover:text-destructive hover:bg-accent transition-colors shrink-0"
-              aria-label="sign out"
-              title="sign out"
-            >
-              <LogOut className="size-4" />
-            </button>
-          </>
-        )}
-      </div>
+      {/* user panel: avatar, name, status; the popover behind it carries the
+          status quote, presence, the account switcher, and settings */}
+      <UserPanel />
     </div>
   )
-}
-
-/** Small presence dot for the status dropdown trigger. */
-function StatusGlyph({ status }: { status: UserPresenceChoice }) {
-  return (
-    <span className="relative size-2.5 shrink-0" aria-hidden="true">
-      {status === 'online' && <span className="absolute inset-0 rounded-full bg-online status-breathe" />}
-      {status === 'idle' && (
-        <>
-          <span className="absolute inset-0 rounded-full bg-idle" />
-          <span className="absolute -top-[30%] -right-[25%] w-[70%] h-[70%] rounded-full bg-popover" />
-        </>
-      )}
-      {status === 'busy' && (
-        <>
-          <span className="absolute inset-0 rounded-full bg-busy" />
-          <span className="absolute left-1/2 bottom-1/2 w-[1.5px] h-[32%] -translate-x-1/2 bg-white/95 rounded-full" />
-          <span className="absolute top-1/2 left-1/2 w-[32%] h-[1.5px] -translate-y-1/2 bg-white/95 rounded-full" />
-        </>
-      )}
-      {status === 'dnd' && (
-        <span className="absolute inset-0 rounded-full bg-dnd grid place-items-center">
-          <span className="w-[55%] h-[2px] rounded-full bg-popover" />
-        </span>
-      )}
-      {status === 'invisible' && <span className="absolute inset-0 rounded-full bg-offline" />}
-    </span>
-  )
-}
-
-/** Proper-case labels for the status dropdown. */
-function presenceChoiceLabel(status: UserPresenceChoice): string {
-  switch (status) {
-    case 'idle':
-      return 'Away / Idle'
-    case 'busy':
-      return 'Busy'
-    case 'dnd':
-      return 'Do not disturb'
-    case 'invisible':
-      return 'Invisible'
-    default:
-      return 'Online'
-  }
 }
 
 /** Label under the name: manual status wins over connection state. */

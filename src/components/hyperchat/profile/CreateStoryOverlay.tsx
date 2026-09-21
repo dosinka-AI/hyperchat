@@ -55,7 +55,7 @@ export function CreateStoryOverlay({ onClose, onCreated }: Props) {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[min(26rem,94vw)] sm:max-w-none p-0 border-border bg-app-sidebar rounded-sm overflow-hidden">
+      <DialogContent className="w-[min(26rem,94vw)] sm:max-w-none p-0 border-border bg-app-sidebar rounded-sm overflow-hidden" aria-describedby={undefined}>
         <DialogTitle className="sr-only">new story</DialogTitle>
 
         <div className="p-4 flex flex-col gap-3">

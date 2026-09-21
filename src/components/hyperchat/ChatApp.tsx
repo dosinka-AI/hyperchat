@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useChatStore, consumePermalinkHash } from '@/lib/client/store'
 import { initSocket, destroySocket, trackActiveRoom, subscribeRoom, unsubscribeRoom, subscribeServerRoom } from '@/lib/client/socket'
+import { initPushToTalk } from '@/lib/client/ptt'
 import { sounds } from '@/lib/client/sounds'
 import { getAppearance } from '@/lib/client/appearance'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -14,7 +15,6 @@ import { MessageInput } from './MessageInput'
 import { MemberList } from './MemberList'
 import { GroupMemberList } from './GroupMemberList'
 import { MediaPlayer } from './MediaPlayer'
-import { AccountSwitcher } from './AccountSwitcher'
 import { AddServerDialog } from './modals/AddServerDialog'
 import { CreateChannelDialog } from './modals/CreateChannelDialog'
 import { InviteDialog } from './modals/InviteDialog'
@@ -29,6 +29,7 @@ import { PinsDialog } from './PinsDialog'
 import { RemindersDialog } from './RemindersDialog'
 import { QuickSwitcher } from './QuickSwitcher'
 import { AccountView } from './AccountView'
+import { AdminPanel } from './AdminPanel'
 import { ProfileEditor } from './ProfileEditor'
 import { ProfileCard } from './ProfileCard'
 import { FriendsView } from './FriendsView'
@@ -43,7 +44,8 @@ import { ShortcutsDialog } from './ShortcutsDialog'
 import { ConfirmDialogHost } from './ConfirmDialog'
 import { ContextMenuHost } from './ContextMenu'
 import { EmojiPopHost } from './EmojiPop'
-import { CallOverlay } from './CallOverlay'
+import { CallOverlay, CallDock, CallStage, CallSpectatorStrip } from './CallOverlay'
+import { GuestVoiceRoom } from './GuestVoiceRoom'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { HyperionMark, HyperionWordmark } from '@/components/hyperion/Logo'
@@ -123,7 +125,7 @@ export default function ChatApp() {
   )
   const pruneTyping = useChatStore((s) => s.pruneTyping)
   const syncNow = useChatStore((s) => s.syncNow)
-  const markRead = useChatStore((s) => s.markRead)
+  const maybeMarkRead = useChatStore((s) => s.maybeMarkRead)
   const tickReminders = useChatStore((s) => s.tickReminders)
   const scheduled = useChatStore((s) => s.scheduled)
   const focusUntil = useChatStore((s) => s.focusUntil)
@@ -133,10 +135,72 @@ export default function ChatApp() {
   const openThreadId = useChatStore((s) => s.openThreadId)
   const selectChannel = useChatStore((s) => s.selectChannel)
   const selectConversation = useChatStore((s) => s.selectConversation)
+  // call surfaces gate themselves: the inline stage (CallStage) decides its
+  // own visibility so it can also run its closing animation when a call
+  // ends while the conversation stays open; the dock and overlay do the same
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false)
-  const [dmProfileOpen, setDmProfileOpen] = useState(true)
+  // the DM profile column is open by default on desktop; on phones it would
+  // bury the chat, so it starts closed and opens as an overlay from the header
+
+  // ---- mobile drawer gestures ----
+  // swipe from the left edge of the screen opens the sidebar drawer; a
+  // leftward swipe on the open drawer closes it. both cancel the moment
+  // the gesture turns vertical so scrolling lists never fights the drawer.
+  const drawerRef = useRef<HTMLDivElement>(null)
+  const swipe = useRef<{ x: number; y: number; mode: 'open' | 'close' | null } | null>(null)
+  const setMobileSidebar = (open: boolean) => setMobileSidebarOpen(open)
+  const onMainTouchStart = (e: React.TouchEvent) => {
+    if (mobileSidebarOpen) return
+    const t = e.touches[0]
+    // only a touch born within 28px of the screen edge can become a swipe
+    swipe.current = t.clientX <= 28 ? { x: t.clientX, y: t.clientY, mode: 'open' } : null
+  }
+  const onMainTouchMove = (e: React.TouchEvent) => {
+    const sw = swipe.current
+    if (!sw || sw.mode !== 'open') return
+    const t = e.touches[0]
+    // vertical intent cancels: that is a scroll, not a swipe
+    if (Math.abs(t.clientY - sw.y) > 24) swipe.current = null
+  }
+  const onMainTouchEnd = (e: React.TouchEvent) => {
+    const sw = swipe.current
+    swipe.current = null
+    if (!sw || sw.mode !== 'open') return
+    const t = e.changedTouches[0]
+    if (t.clientX - sw.x > 56) setMobileSidebar(true)
+  }
+  const onDrawerTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0]
+    // swipes that begin on the drawer's own surface close it
+    swipe.current = { x: t.clientX, y: t.clientY, mode: 'close' }
+  }
+  const onDrawerTouchMove = (e: React.TouchEvent) => {
+    const sw = swipe.current
+    if (!sw || sw.mode !== 'close') return
+    const t = e.touches[0]
+    if (Math.abs(t.clientY - sw.y) > 24) swipe.current = null
+  }
+  const onDrawerTouchEnd = (e: React.TouchEvent) => {
+    const sw = swipe.current
+    swipe.current = null
+    if (!sw || sw.mode !== 'close') return
+    const t = e.changedTouches[0]
+    if (sw.x - t.clientX > 56) setMobileSidebar(false)
+  }
+  const [dmProfileOpen, setDmProfileOpen] = useState(
+    () => typeof window === 'undefined' || window.matchMedia('(min-width: 1024px)').matches
+  )
+  // switching DMs auto-closes the overlay column on phones so each new chat
+  // starts on the conversation, not on the previous person's profile
+  const [lastConversationId, setLastConversationId] = useState(activeConversationId)
+  if (activeConversationId !== lastConversationId) {
+    setLastConversationId(activeConversationId)
+    if (typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches) {
+      setDmProfileOpen(false)
+    }
+  }
 
   // connection gate: once the socket has been down past the grace window the
   // whole app swaps to the reconnect screen until the line returns
@@ -232,13 +296,14 @@ export default function ChatApp() {
     return channelTotal + dmTotal
   })
   useEffect(() => {
-    document.title = totalUnread > 0 ? `(${totalUnread}) HyperChat` : 'HyperChat'
+    document.title = totalUnread > 0 ? `(${totalUnread}) Hyperion` : 'Hyperion'
   }, [totalUnread])
 
   // realtime lifecycle: the persisted presence choice rides the handshake
   useEffect(() => {
     getAppearance() // applies compact + font size data attributes at boot
     initSocket(me?.presence)
+    initPushToTalk() // hold-to-talk key router (voice rooms + calls)
     sounds.play('enter')
     return () => {
       destroySocket()
@@ -308,7 +373,10 @@ export default function ChatApp() {
     }
   }, [view, syncNow])
 
-  // mark the open room read whenever the window regains focus
+  // mark the open room read whenever the window regains focus — but only
+  // honestly: maybeMarkRead re-checks the read gate (focus + recent input,
+  // active room, bottom-parked), so a focus ping on an idle machine or a
+  // history-parked reader claims nothing
   useEffect(() => {
     const onFocus = () => {
       const s = useChatStore.getState()
@@ -317,11 +385,11 @@ export default function ChatApp() {
         : s.activeConversationId
           ? `conversation:${s.activeConversationId}`
           : null
-      if (room) void markRead(room)
+      if (room) maybeMarkRead(room)
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [markRead])
+  }, [maybeMarkRead])
 
   // permalink navigation: #msg=<id> links clicked in-session (pasted into
   // chats) jump without a reload; the boot path handles deep links
@@ -376,46 +444,67 @@ export default function ChatApp() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="h-dvh w-full overflow-hidden bg-app-chat flex text-foreground">
-        {/* server rail: always visible */}
-        <ServerRail
-          onAddServer={() => setAddServerOpen(true)}
-          onNavigated={() => setMobileSidebarOpen(false)}
-        />
-
-        {/* channel sidebar: static on desktop, drawer on mobile */}
-        <div
-          className={cn(
-            'fixed inset-y-0 left-16 md:left-[72px] z-40 w-72 max-w-[80vw] transition-transform duration-150 md:static md:w-60 md:translate-x-0 md:visible md:z-auto',
-            mobileSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full invisible'
-          )}
-        >
-          <ChannelSidebar
-            onInvite={() => setInviteOpen(true)}
-            onOpenSidebarSearch={() => {
-              setSearchScope('conversations')
-              setSearchOpen(true)
-            }}
-            onCreateChannel={(categoryId) => {
-              setCreateChannelCategory(categoryId ?? null)
-              setCreateChannelOpen(true)
-            }}
-            onCreateCategory={() => setCreateCategoryOpen(true)}
-            onFindUser={() => setFindUserOpen(true)}
-            onServerSettings={() => setServerSettingsOpen(true)}
-            onNavigated={() => setMobileSidebarOpen(false)}
-          />
+      <div className="h-dvh w-full overflow-hidden bg-app-chat flex flex-col text-foreground">
+        {/* the collapsed call docks here, Discord-style: a medium strip
+            pinned just below the top bar, spanning the app. It carries the
+            call's video thumbnails, avatars, status, and controls wherever
+            you browse, and one click returns you to the call location */}
+        <div className="pt-[env(safe-area-inset-top)] shrink-0">
+          <CallDock />
         </div>
+        <div className="flex-1 min-h-0 flex">
+          {/* server rail + channel sidebar, one shell: static columns on
+              desktop; a single slide-in drawer on mobile where the rail
+              rides INSIDE the drawer so the chat column gets the full
+              screen width. swipe from the left edge to open, swipe the
+              drawer left to close. */}
+          <div
+            ref={drawerRef}
+            className={cn(
+              'fixed inset-y-0 left-0 z-40 flex transition-transform duration-150 md:static md:translate-x-0 md:visible md:z-auto',
+              mobileSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full invisible md:visible'
+            )}
+            onTouchStart={onDrawerTouchStart}
+            onTouchMove={onDrawerTouchMove}
+            onTouchEnd={onDrawerTouchEnd}
+          >
+            <ServerRail
+              onAddServer={() => setAddServerOpen(true)}
+              onNavigated={() => setMobileSidebar(false)}
+            />
+            <div className="w-72 max-w-[calc(100vw-4.5rem)] md:w-60 md:max-w-none shrink-0 flex flex-col">
+              <ChannelSidebar
+                onInvite={() => setInviteOpen(true)}
+                onOpenSidebarSearch={() => {
+                  setSearchScope('conversations')
+                  setSearchOpen(true)
+                }}
+                onCreateChannel={(categoryId) => {
+                  setCreateChannelCategory(categoryId ?? null)
+                  setCreateChannelOpen(true)
+                }}
+                onCreateCategory={() => setCreateCategoryOpen(true)}
+                onFindUser={() => setFindUserOpen(true)}
+                onServerSettings={() => setServerSettingsOpen(true)}
+                onNavigated={() => setMobileSidebar(false)}
+              />
+            </div>
+          </div>
         {mobileSidebarOpen && (
           <button
             className="fixed inset-0 z-30 bg-black/70 md:hidden"
-            onClick={() => setMobileSidebarOpen(false)}
+            onClick={() => setMobileSidebar(false)}
             aria-label="close channel list"
           />
         )}
 
         {/* main column */}
-        <main className="flex-1 min-w-0 flex flex-col bg-app-chat">
+        <main
+          className="flex-1 min-w-0 flex flex-col bg-app-chat"
+          onTouchStart={onMainTouchStart}
+          onTouchMove={onMainTouchMove}
+          onTouchEnd={onMainTouchEnd}
+        >
           {friendsViewOpen ? (
             <FriendsView />
           ) : (
@@ -440,24 +529,43 @@ export default function ChatApp() {
                   !activeServerId && activeConversationId ? () => setDmProfileOpen((v) => !v) : undefined
                 }
               />
-              {hasConversationOpen ? (
-                activeChannelId && channelType === 'voice' ? (
-                  <VoiceRoom />
-                ) : activeChannelId && channelType === 'forum' ? (
-                  <ForumView />
+              {/* the content pane is keyed by room: every channel or DM switch
+                  replays the focus-pull transition (blur + settle) instead of
+                  hard-cutting between conversations. min-h-0 is load-bearing:
+                  without it a flex child's default min-height:auto lets the
+                  message list inflate this pane to full content height, the
+                  document grows a scrollbar at the ROOT, and any
+                  scrollIntoView walks the whole app out of view (sidebars
+                  vanish, the composer disappears, everything looks frozen). */}
+              <div key={activeRoom || 'home'} className="flex-1 min-w-0 min-h-0 flex flex-col view-in">
+                {hasConversationOpen ? (
+                  activeChannelId && channelType === 'voice' ? (
+                    <VoiceRoom />
+                  ) : activeChannelId && channelType === 'forum' ? (
+                    <ForumView />
+                  ) : (
+                    <>
+                      {/* the Discord-style inline call stage: sits in the
+                          conversation above the chat while a call is live
+                          here, so texting and talking coexist. Below it, the
+                          spectator band for a live call I am NOT in (a group
+                          chat running a call). Both render
+                          unmounted-clean on their own (and animate out when
+                          the call ends) */}
+                      <CallStage />
+                      <CallSpectatorStrip />
+                      <MessageList room={activeRoom} />
+                      <MessageInput room={activeRoom} />
+                    </>
+                  )
                 ) : (
-                  <>
-                    <MessageList room={activeRoom} />
-                    <MessageInput room={activeRoom} />
-                  </>
-                )
-              ) : (
-                <HomeMain
-                  onCreate={() => setAddServerOpen(true)}
-                  onJoin={() => setAddServerOpen(true)}
-                  onFind={() => setFindUserOpen(true)}
-                />
-              )}
+                  <HomeMain
+                    onCreate={() => setAddServerOpen(true)}
+                    onJoin={() => setAddServerOpen(true)}
+                    onFind={() => setFindUserOpen(true)}
+                  />
+                )}
+              </div>
             </>
           )}
         </main>
@@ -503,6 +611,7 @@ export default function ChatApp() {
             )}
           </>
         )}
+        </div>
       </div>
 
       <AddServerDialog open={addServerOpen} onOpenChange={setAddServerOpen} />
@@ -540,6 +649,7 @@ export default function ChatApp() {
       {/* key remount: every open seeds fresh form state from the current profile,
           so partial saves (banner apply) never wipe unsaved edits */}
       <AccountView key={`acct-${accountOpen}`} />
+      <AdminPanel />
       <ProfileEditor />
       <ProfileCard />
       <SavedMessagesDialog />
@@ -549,8 +659,8 @@ export default function ChatApp() {
       <ContextMenuHost />
       <EmojiPopHost />
       <CallOverlay />
+      <GuestVoiceRoom />
       <MediaPlayer />
-      <AccountSwitcher />
     </TooltipProvider>
   )
 }

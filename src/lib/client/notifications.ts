@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * HyperChat desktop notification engine.
+ * Hyperion desktop notification engine.
  *
  * Desktop notifications are quiet and precise: DMs and direct @mentions of
  * me only, never my own messages, never the room I am already looking at

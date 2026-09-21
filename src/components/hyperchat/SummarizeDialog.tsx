@@ -225,7 +225,7 @@ export function SummarizeDialog({ open, onOpenChange }: { open: boolean; onOpenC
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl p-0 border-border bg-app-sidebar overflow-hidden rounded-sm top-6 translate-y-0" aria-describedby={undefined}>
+      <DialogContent className="max-w-xl p-0 border-border glass overflow-hidden rounded-sm top-6 translate-y-0" aria-describedby={undefined}>
         <DialogTitle className="sr-only">Summarize recent messages</DialogTitle>
 
         <div className="relative flex items-center gap-2.5 px-4 py-3 border-b border-white/10">

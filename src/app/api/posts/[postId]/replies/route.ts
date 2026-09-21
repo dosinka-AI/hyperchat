@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { findForumPost, forumPostMeta } from '@/lib/forum'
+import { findForumPost, forumPostMeta, splitTagCsv } from '@/lib/forum'
 import { AUTHOR_INCLUDE, serverAuthorDecorator, toClientMessage } from '@/lib/messages'
 import { badRequest, channelRoom, emitToRooms, forbidden, notFound, serverError, serverRoom, unauthorized } from '@/lib/realtime'
 import { getMemberContext } from '@/lib/serverPerms'
@@ -64,6 +64,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       title: post.title,
       pinned: post.pinned,
       locked: post.locked,
+      tags: splitTagCsv(post.tags),
       createdAt: post.createdAt.toISOString(),
       updatedAt: post.updatedAt.toISOString(),
       firstMessageId: post.firstMessageId,

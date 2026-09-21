@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#d4f6ff"/>
+      <stop offset="100%" stop-color="#4ea8b8"/>
+    </radialGradient>
+  </defs>
+  <!-- body -->
+  <ellipse cx="80" cy="92" rx="52" ry="46" fill="url(#glow)" stroke="#1f6a75" stroke-width="3"/>
+  <!-- ears -->
+  <path d="M38 60 L30 28 L62 46 Z" fill="url(#glow)" stroke="#1f6a75" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M122 60 L130 28 L98 46 Z" fill="url(#glow)" stroke="#1f6a75" stroke-width="3" stroke-linejoin="round"/>
+  <!-- wide sparkly eyes -->
+  <circle cx="62" cy="86" r="9" fill="#0f3f47"/>
+  <circle cx="98" cy="86" r="9" fill="#0f3f47"/>
+  <circle cx="65" cy="82" r="3" fill="#fff"/>
+  <circle cx="101" cy="82" r="3" fill="#fff"/>
+  <circle cx="60" cy="90" r="1.5" fill="#bfeef5"/>
+  <circle cx="96" cy="90" r="1.5" fill="#bfeef5"/>
+  <!-- shocked round mouth -->
+  <ellipse cx="80" cy="108" rx="8" ry="10" fill="#0f3f47"/>
+  <!-- surprise lines -->
+  <path d="M28 44 l-10 -8 M40 34 l-4 -12" stroke="#4ea8b8" stroke-width="3" stroke-linecap="round"/>
+  <path d="M132 44 l10 -8 M120 34 l4 -12" stroke="#4ea8b8" stroke-width="3" stroke-linecap="round"/>
+  <!-- star -->
+  <path d="M136 120 l3.5 7 7.5 1 -5.5 5.5 1.5 7.5 -7 -4 -7 4 1.5 -7.5 -5.5 -5.5 7.5 -1 Z" fill="#ffd76e" stroke="#a8741f" stroke-width="1.5"/>
+</svg>

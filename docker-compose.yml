@@ -1,0 +1,41 @@
+# HyperChat full alpha - one container holding the web app, the realtime
+# sidecar and the front proxy, plus a persistent volume for the database
+# and uploaded files.
+#
+#   cp .env.production.example .env.production   # fill in the secrets
+#   docker compose up -d --build
+#   open http://<host-ip>/
+#
+# Quick mode below publishes the container's LISTEN_PORT (3000) on host
+# port 80 as plain HTTP. For automatic HTTPS on a real domain, set
+# SITE_ADDRESS in .env.production and switch the ports block - see DEPLOY.md.
+name: hyperchat
+
+services:
+  app:
+    build:
+      context: .
+      # already the Dockerfile default; kept explicit for visibility
+      args:
+        NEXT_PUBLIC_SOCKET_PATH: /socket.io
+    image: hyperchat:alpha
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: file:/data/custom.db
+      UPLOADS_DIR: /data/uploads
+      LISTEN_PORT: 3000
+    volumes:
+      - hyperchat-data:/data
+    ports:
+      # quick mode: http://<host-ip>/  (voice needs HTTPS - see DEPLOY.md)
+      - "${PUBLIC_PORT:-80}:3000"
+      # domain mode instead: comment the line above, uncomment these, and
+      # set SITE_ADDRESS=alpha.example.com in .env.production
+      # - "80:80"
+      # - "443:443"
+      # - "443:443/udp"
+
+volumes:
+  hyperchat-data:

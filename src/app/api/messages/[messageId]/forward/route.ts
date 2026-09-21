@@ -26,12 +26,23 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!source.content && !source.imageUrl && !source.attachments) {
       return NextResponse.json({ error: 'Nothing to forward.' }, { status: 400 })
     }
+    // whispers stay between the pair: a third party must never be able to
+    // copy a private aside out by forwarding its id
+    if (source.whisperTargetId && source.whisperTargetId !== me.id && source.authorId !== me.id) {
+      return forbidden('You cannot forward that message.')
+    }
 
-    // read access on the source: members see channel rows, participants see DMs
+    // read access on the source: members see channel rows, participants see DMs.
+    // Private channels additionally require the same read grant as the
+    // message-list route itself — a member without access must not be able to
+    // exfiltrate a private channel's content by forwarding a known message id.
     if (source.channelId) {
-      const channel = await db.channel.findUnique({ where: { id: source.channelId }, select: { serverId: true } })
+      const channel = await db.channel.findUnique({
+        where: { id: source.channelId },
+        include: { access: { select: { roleId: true } } },
+      })
       const ctx = channel ? await getMemberContext(channel.serverId, me.id) : null
-      if (!ctx) return forbidden('You cannot forward that message.')
+      if (!ctx || !ctx.canReadChannel(channel!)) return forbidden('You cannot forward that message.')
     } else if (source.conversationId) {
       const participant = await db.conversationParticipant.findUnique({
         where: { conversationId_userId: { conversationId: source.conversationId, userId: me.id } },

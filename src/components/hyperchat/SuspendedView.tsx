@@ -25,7 +25,7 @@ export default function SuspendedView() {
       <div className="flex flex-col items-center gap-5 max-w-md text-center">
         <div className="flex items-center gap-3">
           <HyperionMark className="w-8 h-8 opacity-40" />
-          <span className="text-sm font-bold tracking-tight text-muted-foreground">HyperChat</span>
+          <span className="text-sm font-bold tracking-tight text-muted-foreground">Hyperion</span>
         </div>
         <ShieldOff className="size-10 text-destructive" />
         <h1 className="text-2xl font-bold tracking-tight">Account suspended</h1>

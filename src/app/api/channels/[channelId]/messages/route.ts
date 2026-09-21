@@ -58,15 +58,45 @@ export async function GET(req: NextRequest, { params }: Params) {
     const readState = await db.readState.findUnique({
       where: { userId_scopeKey: { userId: me.id, scopeKey: `channel:${channelId}` } },
     })
+    // friends-only read receipts: each FRIEND of mine who is a member of
+    // this channel's server and has read here — their latest stamp, so my
+    // own messages can show "seen" chips without any polling. One query
+    // pair per channel load, riding the existing read flow.
+    const friendRows = await db.friendship.findMany({
+      where: {
+        status: 'ACCEPTED',
+        OR: [{ requesterId: me.id }, { addresseeId: me.id }],
+      },
+      select: { requesterId: true, addresseeId: true },
+    })
+    const friendIds = friendRows
+      .map((f) => (f.requesterId === me.id ? f.addresseeId : f.requesterId))
+      .filter((id) => id !== me.id)
+    let friendReadAt: Record<string, string> = {}
+    if (friendIds.length > 0) {
+      const memberRows = await db.serverMember.findMany({
+        where: { serverId: channel.serverId },
+        select: { userId: true },
+      })
+      const memberIds = new Set(memberRows.map((m) => m.userId))
+      const readRows = await db.readState.findMany({
+        where: {
+          scopeKey: `channel:${channelId}`,
+          userId: { in: friendIds.filter((id) => memberIds.has(id)) },
+        },
+        select: { userId: true, lastReadAt: true },
+      })
+      friendReadAt = Object.fromEntries(readRows.map((r) => [r.userId, r.lastReadAt.toISOString()]))
+    }
     if (anchor) {
       // permalink jump: a window centered on the anchor row instead of the
       // newest page; hasNewer drives the client's jump-to-present bar
       const res = await fetchMessagesAround(me.id, { channelId }, anchor, channelRoom(channelId), 12, decorate)
       if (!res) return notFound('Message not found.')
-      return NextResponse.json({ ...res, myReadAt: readState ? readState.lastReadAt.toISOString() : null })
+      return NextResponse.json({ ...res, myReadAt: readState ? readState.lastReadAt.toISOString() : null, friendReadAt })
     }
     const result = await fetchMessagesFor(me.id, { channelId }, channelRoom(channelId), before, 50, after, decorate)
-    return NextResponse.json({ ...result, myReadAt: readState ? readState.lastReadAt.toISOString() : null })
+    return NextResponse.json({ ...result, myReadAt: readState ? readState.lastReadAt.toISOString() : null, friendReadAt })
   } catch {
     return serverError()
   }
@@ -150,7 +180,20 @@ export async function POST(req: NextRequest, { params }: Params) {
       whisperTargetName = target.user.username
     }
 
-    if (!content && !imageUrl && !attachmentsJson) {
+    // sticker: send a server sticker whole. The server looks the row up
+    // (never trusts client name/url) and snapshots name+url onto the message.
+    let stickerName: string | null = null
+    let stickerUrl: string | null = null
+    if (typeof body.stickerId === 'string' && body.stickerId) {
+      const sticker = await db.sticker.findUnique({ where: { id: body.stickerId } })
+      if (!sticker || sticker.serverId !== channel.serverId) {
+        return badRequest('That sticker is not on this server.')
+      }
+      stickerName = sticker.name
+      stickerUrl = sticker.url
+    }
+
+    if (!content && !imageUrl && !attachmentsJson && !stickerUrl) {
       return badRequest('Type a message or attach something.')
     }
 
@@ -202,6 +245,8 @@ export async function POST(req: NextRequest, { params }: Params) {
         pingsEveryone,
         whisperTargetId,
         whisperTargetName,
+        stickerName,
+        stickerUrl,
       },
       include: AUTHOR_INCLUDE,
     })

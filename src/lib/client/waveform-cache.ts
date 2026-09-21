@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 /** Real waveforms for any audio url. Voice notes ship recorded levels on the
  *  attachment; every other audio file gets its peaks decoded straight from
@@ -37,14 +37,12 @@ export function analyzeAudioPeaks(url: string): Promise<number[]> {
     const ctx = audioCtx()
     if (!ctx) return []
     try {
-      if (ctx.state === 'suspended') await ctx.resume().catch(() => undefined)
-      const res = await fetch(url, { credentials: 'same-origin' })
+      const res = await fetch(url)
       if (!res.ok) return []
       const buf = await res.arrayBuffer()
-      const audio = await ctx.decodeAudioData(buf.slice(0))
+      const audio = await ctx.decodeAudioData(buf)
       const channels = Math.min(audio.numberOfChannels, 2)
       const len = audio.length
-      if (len < 8) return []
       const per = Math.max(1, Math.floor(len / PEAK_BUCKETS))
       const peaks = new Array<number>(PEAK_BUCKETS).fill(0)
       const data: Float32Array[] = []
@@ -60,12 +58,6 @@ export function analyzeAudioPeaks(url: string): Promise<number[]> {
           }
         }
         peaks[b] = Math.min(1, peak)
-      }
-      // normalize so quiet files still show shape
-      let max = 0
-      for (const p of peaks) if (p > max) max = p
-      if (max > 0.01) {
-        for (let i = 0; i < peaks.length; i++) peaks[i] = Math.min(1, peaks[i] / max)
       }
       if (peakCache.size >= CACHE_LIMIT) {
         const oldest = peakCache.keys().next().value
@@ -116,19 +108,22 @@ function normalizePayload(data: number[] | undefined, count: number): number[] |
 
 /** Waveform bars for one audio url. Attachments that carry recorded levels
  *  (voice notes) use them directly; anything else decodes real peaks on
- *  mount (flat quiet bars until they land - never a synthetic fingerprint). */
+ *  mount (flat quiet bars until they land — never a synthetic fingerprint).
+ *  Peaks are tagged with the url they came from so a url change can never
+ *  briefly render the previous file's shape. */
 export function useRealWaveform(url: string, data: number[] | undefined, count: number): number[] {
   const payload = normalizePayload(data, count)
-  const [peaks, setPeaks] = useState<number[]>(() => peakCache.get(url) ?? [])
-  const askedFor = useRef<string | null>(null)
+  const [cached, setCached] = useState<{ url: string; peaks: number[] } | null>(() => {
+    const hit = peakCache.get(url)
+    return hit ? { url, peaks: hit } : null
+  })
 
   useEffect(() => {
-    if (payload || askedFor.current === url) return
-    askedFor.current = url
+    if (payload) return
     let alive = true
     void analyzeAudioPeaks(url).then((p) => {
       if (!alive || p.length === 0) return
-      setPeaks(p)
+      setCached({ url, peaks: p })
     })
     return () => {
       alive = false
@@ -136,6 +131,6 @@ export function useRealWaveform(url: string, data: number[] | undefined, count: 
   }, [url, payload])
 
   if (payload) return payload
-  if (peaks.length > 0) return resamplePeaks(peaks, count)
+  if (cached && cached.url === url) return resamplePeaks(cached.peaks, count)
   return new Array(count).fill(0.14)
 }

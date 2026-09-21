@@ -9,6 +9,7 @@ import { AtSign, ChevronDown, ChevronRight, Crown, Shield, ShieldCheck, Clock, M
 import { cn } from '@/lib/utils'
 import type { RoleSummary, ServerMemberSummary, VisiblePresence } from '@/lib/types'
 import { openContextMenu } from './ContextMenu'
+import { callMenuItems } from './callMenu'
 import { awayForLabel } from './MessageList'
 import { lastOnlineLabel } from '@/lib/client/format'
 
@@ -56,7 +57,7 @@ function MemberRow({
       onClick={() => onOpenProfile(member.username)}
       onContextMenu={(e) => onContext(e, member)}
       className={cn(
-        'w-full flex items-center gap-2.5 px-2 py-1.5 rounded-sm text-sm transition-colors text-left',
+        'w-full flex items-center gap-2.5 px-2 py-1.5 rounded-sm text-sm transition-[color,background-color,transform] duration-150 ease-out hover:translate-x-0.5 text-left',
         online
           ? 'text-foreground/90 hover:bg-app-raise/60 hover:text-foreground'
           : 'text-muted-foreground/70 hover:bg-app-raise/60 hover:text-foreground/80'
@@ -77,7 +78,7 @@ function MemberRow({
             onAvatarClick(e as unknown as React.MouseEvent, member)
           }
         }}
-        className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-hyper/70 cursor-pointer"
+        className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-hyper/70 cursor-pointer avatar-hover"
         aria-label={`${member.username}: open mini profile`}
       >
         <Avatar
@@ -100,7 +101,7 @@ function MemberRow({
           </span>
           {member.role === 'OWNER' && <Crown className="size-3.5 text-white/80 shrink-0" aria-label="server owner" />}
           {member.role === 'ADMIN' && <Shield className="size-3.5 text-muted-foreground shrink-0" aria-label="server admin" />}
-          {member.siteAdmin && <ShieldCheck className="size-3.5 text-hyper shrink-0" aria-label="HyperChat admin" />}
+          {member.siteAdmin && <ShieldCheck className="size-3.5 text-hyper shrink-0" aria-label="Hyperion admin" />}
           {timedOut && (
             <span
               className="flex items-center gap-0.5 text-[10px] text-destructive shrink-0"
@@ -197,6 +198,7 @@ export function MemberList({ onOpenProfile }: { onOpenProfile?: () => void }) {
         { kind: 'item', label: 'view profile', icon: UserRound, onSelect: () => viewProfile(member.username) },
         ...(member.id !== me?.id
           ? [
+              ...callMenuItems({ id: member.id, username: member.username, displayName: member.displayName }),
               {
                 kind: 'item' as const,
                 label: 'message',
@@ -281,7 +283,7 @@ export function MemberList({ onOpenProfile }: { onOpenProfile?: () => void }) {
 
   return (
     <aside
-      className="w-full h-full bg-app-sidebar border-l border-white/10 flex flex-col"
+      className="w-full h-full bg-app-sidebar border-l border-white/10 flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0"
       aria-label="server members"
     >
       <div className="flex-1 overflow-y-auto scroll-thin px-2 py-3">

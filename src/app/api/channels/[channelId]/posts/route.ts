@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { loadForumPosts } from '@/lib/forum'
+import { loadForumPosts, resolvePostTags } from '@/lib/forum'
 import { AUTHOR_INCLUDE, toClientMessage } from '@/lib/messages'
 import { badRequest, channelRoom, emitToRooms, forbidden, notFound, serverError, serverRoom, unauthorized } from '@/lib/realtime'
 import { getMemberContext } from '@/lib/serverPerms'
@@ -68,6 +68,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!title) return badRequest('Give the post a title.')
     if (!content && !body.title) return badRequest('Give the post a title.')
 
+    // optional tags: every name must exist as a ForumTag of this channel
+    const tagRes = await resolvePostTags(channelId, body.tags)
+    if (!tagRes.ok) return badRequest(tagRes.error)
+    const tagNames = tagRes.names
+
     // title-only posts are allowed: the root message content stays null and
     // the title lives on the ForumPost row
     const rootMessage = await db.message.create({
@@ -86,6 +91,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         authorId: me.id,
         title,
         firstMessageId: rootMessage.id,
+        tags: tagNames.join(','),
       },
       include: {
         author: { select: { id: true, username: true, displayName: true, avatarUrl: true, avatarColor: true } },
@@ -98,6 +104,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       title: post.title,
       pinned: post.pinned,
       locked: post.locked,
+      tags: tagNames,
       createdAt: post.createdAt.toISOString(),
       updatedAt: post.updatedAt.toISOString(),
       firstMessageId: post.firstMessageId,

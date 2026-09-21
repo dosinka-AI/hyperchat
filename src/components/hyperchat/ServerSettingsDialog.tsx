@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
+import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
 import {
   Crown,
@@ -569,6 +570,46 @@ export function ServerSettingsDialog({ open, onOpenChange }: { open: boolean; on
                         {v === 'PRIVATE' ? 'private' : 'public'}
                       </button>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {canManageServer && (
+                <div className="space-y-1.5">
+                  <Label>call channels</Label>
+                  <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-app-raise px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold">allow call channels in voice channels</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">members can spin up named call channels while in a voice channel.</p>
+                    </div>
+                    <Switch
+                      checked={server.callChannelsEnabled !== false}
+                      onCheckedChange={(v) => {
+                        sounds.play('lightTick')
+                        void updateServer(server.id, { callChannelsEnabled: v })
+                      }}
+                      aria-label="toggle call channels"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {canManageServer && (
+                <div className="space-y-1.5">
+                  <Label>guest rings</Label>
+                  <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-app-raise px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold">ring people who aren&apos;t members into voice channels</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">guests see only the voice channel they were rung into. off = only server members can be rung.</p>
+                    </div>
+                    <Switch
+                      checked={server.allowGuestRings !== false}
+                      onCheckedChange={(v) => {
+                        sounds.play('lightTick')
+                        void updateServer(server.id, { allowGuestRings: v })
+                      }}
+                      aria-label="toggle guest rings"
+                    />
                   </div>
                 </div>
               )}

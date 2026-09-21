@@ -15,6 +15,7 @@ import {
   conversationRoom,
   emitToRooms,
   forbidden,
+  guestRoom,
   notFound,
   serverError,
   unauthorized,
@@ -109,7 +110,18 @@ export async function POST(req: NextRequest, { params }: Params) {
     const { conversationId } = await params
     const participantIds = await getParticipantIds(conversationId)
     if (!participantIds) return notFound('Conversation not found.')
-    if (!participantIds.includes(me.id)) return forbidden('You are not part of this conversation.')
+    // a cross-rung call GUEST (rung into a live call from outside the
+    // conversation) may SEND while their ticket lives — they can never read.
+    // Members take the normal path below.
+    let isGuest = false
+    if (!participantIds.includes(me.id)) {
+      const ticket = await db.callGuest.findFirst({
+        where: { conversationId, userId: me.id, expiresAt: { gt: new Date() } },
+        select: { id: true },
+      })
+      if (!ticket) return forbidden('You are not part of this conversation.')
+      isGuest = true
+    }
     if (await dmIsBlocked(conversationId, me.id)) {
       return forbidden('You cannot message this user.')
     }
@@ -131,6 +143,23 @@ export async function POST(req: NextRequest, { params }: Params) {
     const attachmentsJson = normalizeAttachments(body.attachments)
     // client nonce for optimistic sends: echoed back, never persisted
     const nonce = typeof body.nonce === 'string' ? body.nonce.slice(0, 64) : null
+
+    // THE VAULT: optional ephemeral chunked file riding this message. Server
+    // is authoritative: ready + unexpired + sent by me + minted for THIS
+    // conversation, or the send bounces.
+    const fileId = typeof body.fileId === 'string' ? body.fileId : null
+    let attachFileId: string | null = null
+    if (fileId) {
+      const upload = await db.fileUpload.findUnique({ where: { id: fileId } })
+      if (!upload) return badRequest('That file no longer exists.')
+      if (upload.uploaderId !== me.id) return forbidden('Only the uploader can send this file.')
+      if (upload.conversationId !== conversationId) {
+        return badRequest('That file belongs to another conversation.')
+      }
+      if (upload.status !== 'ready') return badRequest('That file is still uploading.')
+      if (upload.expiresAt.getTime() <= Date.now()) return badRequest('That file has expired.')
+      attachFileId = upload.id
+    }
 
     // thread: the reply rides under a root message of this same conversation
     let threadOfId: string | null = null
@@ -169,7 +198,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       whisperTargetName = target.username
     }
 
-    if (!content && !imageUrl && !attachmentsJson) {
+    if (!content && !imageUrl && !attachmentsJson && !attachFileId) {
       return badRequest('Type a message or attach something.')
     }
 
@@ -180,6 +209,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         content: content || null,
         imageUrl,
         attachments: attachmentsJson,
+        fileId: attachFileId,
         replyToId,
         threadOfId,
         expiresAt,
@@ -223,6 +253,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       await emitToRooms([userRoom(me.id), userRoom(whisperTargetId)], 'message:new', payload)
     } else {
       await emitToRooms([room, ...participantIds.map((id) => userRoom(id))], 'message:new', payload)
+      // a GUEST author's send echoes to the call's guest room REDUCED: their
+      // own other tabs (and any other guests) learn the row landed, but
+      // nobody outside the membership ever sees the content. Members'
+      // messages are never delivered to guests in any form.
+      if (isGuest) {
+        await emitToRooms([guestRoom(conversationId)], 'message:new', {
+          id: message.id,
+          conversationId,
+          authorId: me.id,
+        })
+      }
     }
 
     return NextResponse.json({ message: payload }, { status: 201 })

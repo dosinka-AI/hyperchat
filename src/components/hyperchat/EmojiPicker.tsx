@@ -3,12 +3,14 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
-import { Search, Smile, Film, X, Bookmark } from 'lucide-react'
+import { Search, Smile, Film, X, Bookmark, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { sounds } from '@/lib/client/sounds'
 import { apiClient } from '@/lib/client/api'
 import { useChatStore } from '@/lib/client/store'
 import { EmojiText, isServerEmojiName, lookupServerEmoji, getServerEmojiVersion } from '@/lib/client/serverEmoji'
+import { hasPerm, PERM } from '@/lib/perm'
+import type { StickerSummary } from '@/lib/types'
 
 type EmojiDef = { char: string; names: string }
 
@@ -21,6 +23,8 @@ type GifResult = { id: string; url: string; title: string; preview?: string }
 /** Stable empty list for store-selector fallbacks: a fresh [] there breaks
  *  getSnapshot caching and loops React. */
 const EMPTY_EMOJI_LIST: { id: string; name: string; url: string }[] = []
+/** Same stability trick for the sticker grid. */
+const EMPTY_STICKER_LIST: StickerSummary[] = []
 
 // Compact but broad emoji kit: 8 categories, searchable by keyword names.
 const CATEGORIES: { id: string; label: string; emojis: EmojiDef[] }[] = [
@@ -412,69 +416,283 @@ const CATEGORIES: { id: string; label: string; emojis: EmojiDef[] }[] = [
       { char: '🕐', names: 'clock time' },
     ],
   },
-  {
-    id: 'flags',
-    label: 'flags',
-    emojis: [
-      { char: '🇺🇸', names: 'us usa america flag united states' },
-      { char: '🇬🇧', names: 'uk gb britain england flag united kingdom' },
-      { char: '🇨🇦', names: 'canada flag' },
-      { char: '🇦🇺', names: 'australia flag' },
-      { char: '🇩🇪', names: 'germany flag' },
-      { char: '🇫🇷', names: 'france flag' },
-      { char: '🇯🇵', names: 'japan flag' },
-      { char: '🇰🇷', names: 'korea south flag' },
-      { char: '🇨🇳', names: 'china flag' },
-      { char: '🇮🇳', names: 'india flag' },
-      { char: '🇧🇷', names: 'brazil flag' },
-      { char: '🇲🇽', names: 'mexico flag' },
-      { char: '🇪🇸', names: 'spain flag' },
-      { char: '🇮🇹', names: 'italy flag' },
-      { char: '🇳🇱', names: 'netherlands holland flag' },
-      { char: '🇸🇪', names: 'sweden flag' },
-      { char: '🇳🇴', names: 'norway flag' },
-      { char: '🇩🇰', names: 'denmark flag' },
-      { char: '🇫🇮', names: 'finland flag' },
-      { char: '🇵🇱', names: 'poland flag' },
-      { char: '🇺🇦', names: 'ukraine flag' },
-      { char: '🇷🇺', names: 'russia flag' },
-      { char: '🇹🇷', names: 'turkey flag' },
-      { char: '🇸🇦', names: 'saudi arabia flag' },
-      { char: '🇦🇪', names: 'uae emirates flag' },
-      { char: '🇮🇱', names: 'israel flag' },
-      { char: '🇿🇦', names: 'south africa flag' },
-      { char: '🇳🇬', names: 'nigeria flag' },
-      { char: '🇪🇬', names: 'egypt flag' },
-      { char: '🇦🇷', names: 'argentina flag' },
-      { char: '🇨🇱', names: 'chile flag' },
-      { char: '🇨🇴', names: 'colombia flag' },
-      { char: '🇵🇪', names: 'peru flag' },
-      { char: '🇳🇿', names: 'new zealand flag' },
-      { char: '🇸🇬', names: 'singapore flag' },
-      { char: '🇵🇭', names: 'philippines flag' },
-      { char: '🇹🇭', names: 'thailand flag' },
-      { char: '🇻🇳', names: 'vietnam flag' },
-      { char: '🇮🇩', names: 'indonesia flag' },
-      { char: '🇲🇾', names: 'malaysia flag' },
-      { char: '🇵🇹', names: 'portugal flag' },
-      { char: '🇬🇷', names: 'greece flag' },
-      { char: '🇮🇪', names: 'ireland flag' },
-      { char: '🇨🇭', names: 'switzerland flag' },
-      { char: '🇦🇹', names: 'austria flag' },
-      { char: '🇧🇪', names: 'belgium flag' },
-      { char: '🇨🇿', names: 'czech flag' },
-      { char: '🇷🇴', names: 'romania flag' },
-      { char: '🇭🇺', names: 'hungary flag' },
-      { char: '🏳️', names: 'white flag' },
-      { char: '🏴', names: 'black flag' },
-      { char: '🏁', names: 'checkered race flag' },
-      { char: '🚩', names: 'triangular flag' },
-      { char: '🏳️‍🌈', names: 'rainbow pride flag' },
-      { char: '🏳️‍⚧️', names: 'transgender flag' },
-      { char: '🏴‍☠️', names: 'pirate flag' },
-    ],
-  },
 ]
+
+/** ISO-3166 code -> country/territory display name + search keywords for
+ *  every bundled twemoji flag glyph (258 pairs). The emoji char itself is
+ *  derived from the code: A=0x1F1E6, so "US" -> U+1F1FA U+1F1F8. */
+const FLAG_NAMES: [string, string][] = [
+  ['AC', 'ascension island'],
+  ['AD', 'andorra'],
+  ['AE', 'united arab emirates flag uae'],
+  ['AF', 'afghanistan'],
+  ['AG', 'antigua and barbuda'],
+  ['AI', 'anguilla'],
+  ['AL', 'albania'],
+  ['AM', 'armenia'],
+  ['AO', 'angola'],
+  ['AQ', 'antarctica'],
+  ['AR', 'argentina'],
+  ['AS', 'american samoa'],
+  ['AT', 'austria'],
+  ['AU', 'australia'],
+  ['AW', 'aruba'],
+  ['AX', 'aland islands'],
+  ['AZ', 'azerbaijan'],
+  ['BA', 'bosnia and herzegovina'],
+  ['BB', 'barbados'],
+  ['BD', 'bangladesh'],
+  ['BE', 'belgium'],
+  ['BF', 'burkina faso'],
+  ['BG', 'bulgaria'],
+  ['BH', 'bahrain'],
+  ['BI', 'burundi'],
+  ['BJ', 'benin'],
+  ['BL', 'st barthelemy'],
+  ['BM', 'bermuda'],
+  ['BN', 'brunei'],
+  ['BO', 'bolivia'],
+  ['BQ', 'caribbean netherlands'],
+  ['BR', 'brazil'],
+  ['BS', 'bahamas'],
+  ['BT', 'bhutan'],
+  ['BV', 'bouvet island'],
+  ['BW', 'botswana'],
+  ['BY', 'belarus'],
+  ['BZ', 'belize'],
+  ['CA', 'canada'],
+  ['CC', 'cocos islands'],
+  ['CD', 'congo kinshasa flag drc'],
+  ['CF', 'central african republic'],
+  ['CG', 'congo brazzaville flag congo'],
+  ['CH', 'switzerland'],
+  ['CI', 'cote divoire'],
+  ['CK', 'cook islands'],
+  ['CL', 'chile'],
+  ['CM', 'cameroon'],
+  ['CN', 'china'],
+  ['CO', 'colombia'],
+  ['CP', 'clipperton island'],
+  ['CR', 'costa rica'],
+  ['CU', 'cuba'],
+  ['CV', 'cape verde'],
+  ['CW', 'curacao'],
+  ['CX', 'christmas island'],
+  ['CY', 'cyprus'],
+  ['CZ', 'czechia'],
+  ['DE', 'germany'],
+  ['DG', 'diego garcia'],
+  ['DJ', 'djibouti'],
+  ['DK', 'denmark'],
+  ['DM', 'dominica'],
+  ['DO', 'dominican republic flag dom rep'],
+  ['DZ', 'algeria'],
+  ['EA', 'ceuta melilla'],
+  ['EC', 'ecuador'],
+  ['EE', 'estonia'],
+  ['EG', 'egypt'],
+  ['EH', 'western sahara'],
+  ['ER', 'eritrea'],
+  ['ES', 'spain'],
+  ['ET', 'ethiopia'],
+  ['EU', 'european union'],
+  ['FI', 'finland'],
+  ['FJ', 'fiji'],
+  ['FK', 'falkland islands'],
+  ['FM', 'micronesia'],
+  ['FO', 'faroe islands'],
+  ['FR', 'france'],
+  ['GA', 'gabon'],
+  ['GB', 'united kingdom britain uk england flag uk britain'],
+  ['GD', 'grenada'],
+  ['GE', 'georgia'],
+  ['GF', 'french guiana'],
+  ['GG', 'guernsey'],
+  ['GH', 'ghana'],
+  ['GI', 'gibraltar'],
+  ['GL', 'greenland'],
+  ['GM', 'gambia'],
+  ['GN', 'guinea'],
+  ['GP', 'guadeloupe'],
+  ['GQ', 'equatorial guinea'],
+  ['GR', 'greece'],
+  ['GS', 'south georgia'],
+  ['GT', 'guatemala'],
+  ['GU', 'guam'],
+  ['GW', 'guinea bissau'],
+  ['GY', 'guyana'],
+  ['HK', 'hong kong'],
+  ['HM', 'heard island'],
+  ['HN', 'honduras'],
+  ['HR', 'croatia'],
+  ['HT', 'haiti'],
+  ['HU', 'hungary'],
+  ['IC', 'canary islands'],
+  ['ID', 'indonesia'],
+  ['IE', 'ireland'],
+  ['IL', 'israel'],
+  ['IM', 'isle of man'],
+  ['IN', 'india'],
+  ['IO', 'british indian ocean territory'],
+  ['IQ', 'iraq'],
+  ['IR', 'iran'],
+  ['IS', 'iceland'],
+  ['IT', 'italy'],
+  ['JE', 'jersey'],
+  ['JM', 'jamaica'],
+  ['JO', 'jordan'],
+  ['JP', 'japan'],
+  ['KE', 'kenya'],
+  ['KG', 'kyrgyzstan'],
+  ['KH', 'cambodia'],
+  ['KI', 'kiribati'],
+  ['KM', 'comoros'],
+  ['KN', 'st kitts and nevis'],
+  ['KP', 'north korea flag dprk'],
+  ['KR', 'south korea flag korea'],
+  ['KW', 'kuwait'],
+  ['KY', 'cayman islands'],
+  ['KZ', 'kazakhstan'],
+  ['LA', 'laos'],
+  ['LB', 'lebanon'],
+  ['LC', 'st lucia'],
+  ['LI', 'liechtenstein'],
+  ['LK', 'sri lanka'],
+  ['LR', 'liberia'],
+  ['LS', 'lesotho'],
+  ['LT', 'lithuania'],
+  ['LU', 'luxembourg'],
+  ['LV', 'latvia'],
+  ['LY', 'libya'],
+  ['MA', 'morocco'],
+  ['MC', 'monaco'],
+  ['MD', 'moldova'],
+  ['ME', 'montenegro'],
+  ['MF', 'st martin'],
+  ['MG', 'madagascar'],
+  ['MH', 'marshall islands'],
+  ['MK', 'north macedonia'],
+  ['ML', 'mali'],
+  ['MM', 'myanmar burma flag burma'],
+  ['MN', 'mongolia'],
+  ['MO', 'macau'],
+  ['MP', 'northern mariana islands'],
+  ['MQ', 'martinique'],
+  ['MR', 'mauritania'],
+  ['MS', 'montserrat'],
+  ['MT', 'malta'],
+  ['MU', 'mauritius'],
+  ['MV', 'maldives'],
+  ['MW', 'malawi'],
+  ['MX', 'mexico'],
+  ['MY', 'malaysia'],
+  ['MZ', 'mozambique'],
+  ['NA', 'namibia'],
+  ['NC', 'new caledonia'],
+  ['NE', 'niger'],
+  ['NF', 'norfolk island'],
+  ['NG', 'nigeria'],
+  ['NI', 'nicaragua'],
+  ['NL', 'netherlands flag holland'],
+  ['NO', 'norway'],
+  ['NP', 'nepal'],
+  ['NR', 'nauru'],
+  ['NU', 'niue'],
+  ['NZ', 'new zealand'],
+  ['OM', 'oman'],
+  ['PA', 'panama'],
+  ['PE', 'peru'],
+  ['PF', 'french polynesia'],
+  ['PG', 'papua new guinea'],
+  ['PH', 'philippines'],
+  ['PK', 'pakistan'],
+  ['PL', 'poland'],
+  ['PM', 'st pierre and miquelon'],
+  ['PN', 'pitcairn islands'],
+  ['PR', 'puerto rico'],
+  ['PS', 'palestine'],
+  ['PT', 'portugal'],
+  ['PW', 'palau'],
+  ['PY', 'paraguay'],
+  ['QA', 'qatar'],
+  ['RE', 'reunion'],
+  ['RO', 'romania'],
+  ['RS', 'serbia'],
+  ['RU', 'russia'],
+  ['RW', 'rwanda'],
+  ['SA', 'saudi arabia'],
+  ['SB', 'solomon islands'],
+  ['SC', 'seychelles'],
+  ['SD', 'sudan'],
+  ['SE', 'sweden'],
+  ['SG', 'singapore'],
+  ['SH', 'st helena'],
+  ['SI', 'slovenia'],
+  ['SJ', 'svalbard jan mayen'],
+  ['SK', 'slovakia'],
+  ['SL', 'sierra leone'],
+  ['SM', 'san marino'],
+  ['SN', 'senegal'],
+  ['SO', 'somalia'],
+  ['SR', 'suriname'],
+  ['SS', 'south sudan'],
+  ['ST', 'sao tome and principe'],
+  ['SV', 'el salvador'],
+  ['SX', 'sint maarten'],
+  ['SY', 'syria'],
+  ['SZ', 'eswatini swaziland flag swaziland'],
+  ['TA', 'tristan da cunha'],
+  ['TC', 'turks and caicos'],
+  ['TD', 'chad'],
+  ['TF', 'french southern territories'],
+  ['TG', 'togo'],
+  ['TH', 'thailand'],
+  ['TJ', 'tajikistan'],
+  ['TK', 'tokelau'],
+  ['TL', 'timor leste'],
+  ['TM', 'turkmenistan'],
+  ['TN', 'tunisia'],
+  ['TO', 'tonga'],
+  ['TR', 'turkey'],
+  ['TT', 'trinidad and tobago'],
+  ['TV', 'tuvalu'],
+  ['TW', 'taiwan'],
+  ['TZ', 'tanzania'],
+  ['UA', 'ukraine'],
+  ['UG', 'uganda'],
+  ['UM', 'us minor outlying islands'],
+  ['UN', 'united nations'],
+  ['US', 'united states usa america flag usa america'],
+  ['UY', 'uruguay'],
+  ['UZ', 'uzbekistan'],
+  ['VA', 'vatican'],
+  ['VC', 'st vincent and grenadines'],
+  ['VE', 'venezuela'],
+  ['VG', 'british virgin islands'],
+  ['VI', 'us virgin islands'],
+  ['VN', 'vietnam'],
+  ['VU', 'vanuatu'],
+  ['WF', 'wallis and futuna'],
+  ['WS', 'samoa'],
+  ['XK', 'kosovo'],
+  ['YE', 'yemen'],
+  ['YT', 'mayotte'],
+  ['ZA', 'south africa'],
+  ['ZM', 'zambia'],
+  ['ZW', 'zimbabwe'],
+]
+
+/** Build one emoji def per flag: the char is the regional-indicator pair,
+ *  names carry the country name + iso code so both search paths hit. */
+const FLAG_EMOJIS: EmojiDef[] = FLAG_NAMES.map(([code, names]) => ({
+  char: String.fromCodePoint(
+    0x1f1e6 + (code.charCodeAt(0) - 65),
+    0x1f1e6 + (code.charCodeAt(1) - 65)
+  ),
+  names: `${names} ${code.toLowerCase()} flag`,
+}))
+
+CATEGORIES.push({ id: 'flags', label: 'Flags', emojis: FLAG_EMOJIS })
 
 const RECENTS_KEY = 'hyperchat-recent-emojis'
 const RECENTS_MAX = 24
@@ -1125,6 +1343,113 @@ function GifTab({ onPick, open }: { onPick: (gif: GifPick) => void; open: boolea
 }
 
 
+/** The stickers half of the picker: the ACTIVE server's sticker uploads.
+ *  Clicking one sends it whole, Discord-style. There is no default set —
+ *  every sticker here is a file one of the server's admins uploaded.
+ *  Admins (Manage Server) get the add row + per-cell remove. */
+function StickerTab({ onPick, open }: { onPick: (sticker: StickerSummary) => void; open: boolean }) {
+  const activeServerId = useChatStore((s) => s.activeServerId)
+  const stickers = useChatStore((s) => (s.activeServerId ? s.serverStickers[s.activeServerId] : undefined)) ?? EMPTY_STICKER_LIST
+  const canManage = useChatStore((s) => {
+    if (!s.activeServerId) return false
+    const perms = s.servers.find((sv) => sv.id === s.activeServerId)?.myPerms ?? 0
+    return hasPerm(perms, PERM.MANAGE_SERVER)
+  })
+  const addServerSticker = useChatStore((s) => s.addServerSticker)
+  const removeServerSticker = useChatStore((s) => s.removeServerSticker)
+  const [busy, setBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  // refetch every time the popover reopens so a fresh upload by another
+  // admin shows up without a page reload
+  const refreshServerStickers = useChatStore((s) => s.refreshServerStickers)
+  useEffect(() => {
+    if (open && activeServerId) void refreshServerStickers(activeServerId)
+  }, [open, activeServerId, refreshServerStickers])
+
+  async function onFile(file: File | null) {
+    if (!file || !activeServerId || busy) return
+    setBusy(true)
+    // file name minus extension becomes the sticker name (1-32 chars)
+    const base = file.name.replace(/\.[^.]+$/, '').trim().slice(0, 32) || 'sticker'
+    const ok = await addServerSticker(activeServerId, file, base)
+    setBusy(false)
+    if (ok) sounds.play('lightTick')
+  }
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-1.5">
+      {canManage && (
+        <div className="mb-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/gif,image/webp,image/jpeg"
+            className="hidden"
+            aria-hidden="true"
+            tabIndex={-1}
+            onChange={(e) => {
+              void onFile(e.target.files?.[0] ?? null)
+              e.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-sm border border-dashed border-white/15 text-[11px] font-semibold text-muted-foreground hover:text-hyper hover:border-hyper/60 transition-colors disabled:opacity-50"
+          >
+            <Plus className="size-3.5" aria-hidden="true" />
+            {busy ? 'uploading' : 'add sticker'}
+          </button>
+          <div className="h-px bg-white/[0.07] mt-2.5 mb-0.5" aria-hidden="true" />
+        </div>
+      )}
+      {stickers.length === 0 ? (
+        <p className="text-xs text-muted-foreground text-center py-6 px-3">
+          no stickers yet{canManage ? ' — add one above (png, gif, webp or jpg under 1 MB)' : '. a server admin has to add some.'}
+        </p>
+      ) : (
+        <div className="grid grid-cols-3 gap-1">
+          {stickers.map((st) => (
+            <div key={st.id} className="group/st relative">
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.play('lightTick')
+                  onPick(st)
+                }}
+                className="w-full aspect-square rounded-sm overflow-hidden bg-app-raise/50 hover:ring-1 hover:ring-hyper transition grid place-items-center p-1.5 cursor-pointer"
+                aria-label={`send sticker ${st.name}`}
+                title={st.name}
+              >
+                <img
+                  src={st.url}
+                  alt={st.name}
+                  loading="lazy"
+                  decoding="async"
+                  className="max-w-full max-h-full object-contain"
+                />
+              </button>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => activeServerId && void removeServerSticker(activeServerId, st.id)}
+                  className="absolute top-1 right-1 p-1 rounded-sm bg-black/70 text-foreground/80 opacity-0 group-hover/st:opacity-100 focus-visible:opacity-100 transition-opacity"
+                  aria-label={`remove sticker ${st.name}`}
+                  title={`remove ${st.name}`}
+                >
+                  <Trash2 className="size-3" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** The reaction picker body: search + single long list with sticky headers. */
 export function EmojiGrid({ onPick, prewarm }: { onPick: (emoji: string) => void; prewarm?: boolean }) {
   return (
@@ -1141,18 +1466,22 @@ export function EmojiGrid({ onPick, prewarm }: { onPick: (emoji: string) => void
 export function EmojiPicker({
   onPick,
   onGif,
+  onSticker,
   initialMode,
   openRequest,
 }: {
   onPick: (emoji: string) => void
   onGif?: (gif: GifPick) => void
+  /** stickers send whole (server channels only): providing this adds the
+   *  STICKERS tab */
+  onSticker?: (sticker: StickerSummary) => void
   initialMode?: 'emoji' | 'gifs'
   /** external open requests (e.g. the composer's "+" menu opening the gif
    *  tab): bump `at` to open; the mode rides along */
-  openRequest?: { mode: 'emoji' | 'gifs'; at: number }
+  openRequest?: { mode: 'emoji' | 'gifs' | 'stickers'; at: number }
 }) {
   const [open, setOpen] = useState(false)
-  const [mode, setMode] = useState<'emoji' | 'gifs'>(initialMode ?? 'emoji')
+  const [mode, setMode] = useState<'emoji' | 'gifs' | 'stickers'>(initialMode ?? 'emoji')
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const gifFirst = initialMode === 'gifs'
   // keep-alive: the panel mounts during IDLE time after app load (not just
@@ -1211,7 +1540,7 @@ export function EmojiPicker({
       <PopoverTrigger asChild>
         <button
           className={cn(
-            'p-2 rounded-sm transition-colors shrink-0',
+            'p-2 max-md:p-2.5 rounded-sm transition-colors shrink-0',
             gifFirst
               ? 'text-muted-foreground hover:text-hyper hover:bg-hyper/10'
               : 'text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -1237,7 +1566,7 @@ export function EmojiPicker({
           {onGif && (
             <div className="px-1.5 pt-1.5">
               <div
-                className="w-full grid grid-cols-2 p-1 bg-app-raise rounded-sm"
+                className={cn('w-full grid p-1 bg-app-raise rounded-sm', onSticker ? 'grid-cols-3' : 'grid-cols-2')}
                 role="tablist"
                 aria-label="picker mode"
               >
@@ -1269,6 +1598,22 @@ export function EmojiPicker({
                 >
                   gifs
                 </button>
+                {onSticker && (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === 'stickers'}
+                    onClick={() => setMode('stickers')}
+                    className={cn(
+                      'py-1 text-[11px] font-semibold tracking-wide rounded-sm transition-colors',
+                      mode === 'stickers'
+                        ? 'bg-popover text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    stickers
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -1277,6 +1622,14 @@ export function EmojiPicker({
               open={open}
               onPick={(gif) => {
                 onGif(gif)
+                scheduleClose()
+              }}
+            />
+          ) : mode === 'stickers' && onSticker ? (
+            <StickerTab
+              open={open}
+              onPick={(sticker) => {
+                onSticker(sticker)
                 scheduleClose()
               }}
             />
@@ -1298,7 +1651,7 @@ export function ReactionPalette({ onPick, onMore }: { onPick: (emoji: string) =>
         <button
           key={emoji}
           onClick={() => onPick(emoji)}
-          className="size-8 grid place-items-center rounded-sm text-lg hover:bg-accent transition-colors"
+          className="size-8 max-[480px]:size-10 grid place-items-center rounded-sm text-lg hover:bg-accent transition-colors"
           aria-label={`React with ${emoji}`}
         >
           {emoji}

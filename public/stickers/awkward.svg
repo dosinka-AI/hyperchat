@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#ffc7c7"/>
+      <stop offset="100%" stop-color="#e86a6a"/>
+    </radialGradient>
+  </defs>
+  <!-- body -->
+  <ellipse cx="80" cy="92" rx="52" ry="46" fill="url(#glow)" stroke="#9c2f2f" stroke-width="3"/>
+  <!-- ears (one flat) -->
+  <path d="M38 60 L30 28 L62 46 Z" fill="url(#glow)" stroke="#9c2f2f" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M98 52 q26 -14 30 2 q2 16 -20 12 Z" fill="url(#glow)" stroke="#9c2f2f" stroke-width="3" stroke-linejoin="round"/>
+  <!-- worried eyes -->
+  <circle cx="62" cy="86" r="7" fill="#4d1414"/>
+  <circle cx="98" cy="86" r="7" fill="#4d1414"/>
+  <circle cx="64" cy="83" r="2.4" fill="#fff"/>
+  <circle cx="100" cy="83" r="2.4" fill="#fff"/>
+  <!-- raised worried brows -->
+  <path d="M52 72 q10 -8 18 -2" fill="none" stroke="#9c2f2f" stroke-width="3" stroke-linecap="round"/>
+  <path d="M108 72 q-10 -8 -18 -2" fill="none" stroke="#9c2f2f" stroke-width="3" stroke-linecap="round"/>
+  <!-- wavy concerned mouth -->
+  <path d="M68 106 q6 5 12 0 q6 -5 12 0" fill="none" stroke="#4d1414" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- single sweat drop -->
+  <path d="M126 60 q6 10 0 14 q-7 -4 0 -14" fill="#9ecfec" stroke="#5d92b8" stroke-width="2"/>
+</svg>

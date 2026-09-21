@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#ffd9a0"/>
+      <stop offset="100%" stop-color="#f2b04e"/>
+    </radialGradient>
+  </defs>
+  <!-- body -->
+  <ellipse cx="80" cy="92" rx="52" ry="46" fill="url(#glow)" stroke="#a8741f" stroke-width="3"/>
+  <!-- ears -->
+  <path d="M38 60 L30 28 L62 46 Z" fill="url(#glow)" stroke="#a8741f" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M122 60 L130 28 L98 46 Z" fill="url(#glow)" stroke="#a8741f" stroke-width="3" stroke-linejoin="round"/>
+  <!-- squint happy eyes -->
+  <path d="M58 84 q8 -10 16 0" fill="none" stroke="#5b3a10" stroke-width="4" stroke-linecap="round"/>
+  <path d="M86 84 q8 -10 16 0" fill="none" stroke="#5b3a10" stroke-width="4" stroke-linecap="round"/>
+  <!-- blush -->
+  <ellipse cx="52" cy="98" rx="7" ry="4" fill="#ff9d6e" opacity="0.6"/>
+  <ellipse cx="108" cy="98" rx="7" ry="4" fill="#ff9d6e" opacity="0.6"/>
+  <!-- big open smile -->
+  <path d="M64 100 q16 18 32 0 q-16 6 -32 0" fill="#5b3a10"/>
+  <!-- tiny paws up -->
+  <ellipse cx="34" cy="118" rx="10" ry="8" fill="#ffe9c4" stroke="#a8741f" stroke-width="2.5"/>
+  <ellipse cx="126" cy="118" rx="10" ry="8" fill="#ffe9c4" stroke="#a8741f" stroke-width="2.5"/>
+</svg>

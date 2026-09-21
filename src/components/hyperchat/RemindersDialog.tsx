@@ -18,7 +18,7 @@ function whenLabel(iso: string): string {
   return `in ${Math.floor(hours / 24)}d`
 }
 
-/** The reminder manager: everything you asked HyperChat to nudge you about,
+/** The reminder manager: everything you asked Hyperion to nudge you about,
  *  in one list, each one a jump away from its message and one click from
  *  being dropped. Set reminders from the bell in a message's toolbar. */
 export function RemindersDialog() {

@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.production.example
 
 # vercel
 .vercel
@@ -55,3 +56,16 @@ server.log
 tool-results/
 
 .standalone-build/
+fly.toml
+
+# live data (never part of the source graph: the dev server's file watcher
+# must not see these, or every DB write / upload triggers a rebuild + HMR
+# push that churns connected clients' realtime state)
+/db/
+/uploads/
+/archive/
+
+# upload/ (singular, a tmpfs mount) is a runtime file-exchange dir, not
+# source: the dev watcher must never walk it (a poisoned inode inside once
+# wedged every next dev instance in getdents64 for the rest of the session)
+/upload/

@@ -38,6 +38,9 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
+        // plain dim only: a backdrop-filter on a fullscreen overlay forces
+        // the compositor to re-blur the entire app every frame, which has
+        // frozen real tabs (black sidebars, dead clicks)
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
         className
       )}

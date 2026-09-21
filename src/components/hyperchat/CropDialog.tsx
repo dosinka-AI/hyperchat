@@ -209,7 +209,7 @@ function CropDialogInner({
 
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-w-md p-4 border-border bg-app-sidebar rounded-sm dialog-in" aria-describedby={undefined}>
+      <DialogContent className="max-w-md p-4 border-border glass rounded-sm dialog-in" aria-describedby={undefined}>
         <DialogTitle className="text-sm font-bold tracking-tight mb-3">
           {mode === 'avatar' ? 'crop profile picture' : 'crop banner'}
         </DialogTitle>

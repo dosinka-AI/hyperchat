@@ -1,5 +1,5 @@
 // react-syntax-highlighter v15 ships no TypeScript declarations. This
-// declares only the slice HyperChat uses: PrismAsyncLight plus the prism
+// declares only the slice Hyperion uses: PrismAsyncLight plus the prism
 // language deep-imports registered in markdown.tsx.
 
 declare module 'react-syntax-highlighter' {

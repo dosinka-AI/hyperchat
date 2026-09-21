@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessionUser } from '@/lib/auth'
-import { AUTHOR_INCLUDE, toClientMessage, stripRichTokens } from '@/lib/messages'
+import { AUTHOR_INCLUDE, toClientMessage, stripRichTokens, applyMarkerSwap } from '@/lib/messages'
 import { badRequest, channelRoom, conversationRoom, emitToRooms, forbidden, notFound, serverError, unauthorized } from '@/lib/realtime'
 import { getMemberContext } from '@/lib/serverPerms'
 import { hasPerm, PERM } from '@/lib/perm'
@@ -43,6 +43,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         content = stripRichTokens(content)
       }
     }
+
+    // the marker token swaps on edits too, so a message edited to carry it
+    // renders exactly like one that was born with it
+    const marker = applyMarkerSwap(content, me.id)
+    content = marker.content
 
     // edit history: the pre-edit version becomes a snapshot (newest last, capped)
     let history: { content: string; at: string }[] = []

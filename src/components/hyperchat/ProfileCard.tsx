@@ -17,7 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { AtSign, MessageSquare, Shield, Ban, Users, UserX, Clock, UserMinus, Tag, Settings2, Camera, ImagePlus } from 'lucide-react'
+import { AtSign, MessageSquare, Phone, Video, Shield, Ban, Users, UserX, Clock, UserMinus, Tag, Settings2, Camera, ImagePlus } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { confirmDialog, promptDialog } from './ConfirmDialog'
@@ -116,7 +116,7 @@ export function ProfileCard() {
     <>
       <ProfileStyles />
       <Dialog open={profileOpen} onOpenChange={(open) => !open && closeProfile()}>
-        <DialogContent className="w-[min(38rem,94vw)] max-w-none sm:max-w-none p-0 border-border bg-app-sidebar overflow-hidden rounded-sm dialog-in" aria-describedby={undefined}>
+        <DialogContent className="w-[min(38rem,94vw)] max-w-none sm:max-w-none p-0 border-border glass overflow-hidden rounded-sm dialog-in" aria-describedby={undefined}>
           <DialogTitle className="sr-only">{profileUser.displayName || profileUser.username} profile</DialogTitle>
           <ProfileCardBody key={profileUser.username} onClose={closeProfile} onAvatarLightbox={() => setAvatarLightbox(true)} isBlocked={blocked} />
         </DialogContent>
@@ -222,6 +222,62 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
     [username]
   )
 
+  // mirror of the posts list so merge refreshes can read current data
+  // without stale closures (kept honest by the effect below)
+  const postsRef = useRef<ProfileFeedPost[]>([])
+  useEffect(() => {
+    postsRef.current = posts
+  }, [posts])
+
+  /** Live refresh of the grid: fetch page 1 and MERGE it into whatever is
+   *  loaded — counts and captions update in place, brand-new posts prepend,
+   *  already-loaded older pages survive. A full replace here would collapse
+   * the user's scroll position back to page one every time someone likes
+   * anything. */
+  const refreshPosts = useCallback(async () => {
+    if (!username) return
+    try {
+      const res = await apiClient.profilePosts(username, 0)
+      const cur = postsRef.current
+      if (cur.length === 0) {
+        postsRef.current = res.posts
+        setPosts(res.posts)
+        setPostsNextOffset(res.nextOffset)
+        return
+      }
+      const curIds = new Set(cur.map((p) => p.id))
+      const fresh = res.posts.filter((p) => !curIds.has(p.id))
+      const merged = [
+        ...fresh,
+        ...cur.map((p) => {
+          const server = res.posts.find((s) => s.id === p.id)
+          return server &&
+            (server.likeCount !== p.likeCount ||
+              server.commentCount !== p.commentCount ||
+              server.caption !== p.caption)
+            ? server
+            : p
+        }),
+      ]
+      postsRef.current = merged
+      setPosts(merged)
+      // the window grew by the number of prepended posts
+      setPostsNextOffset((off) =>
+        res.nextOffset === null || off === null ? res.nextOffset : off + fresh.length
+      )
+    } catch {
+      /* live refresh is best-effort */
+    }
+  }, [username])
+
+  /** Drop one post locally after its deletion instead of refetching the
+   *  whole grid (which would reset pagination and scroll). */
+  const removePost = useCallback((postId: string) => {
+    setPosts((cur) => cur.filter((p) => p.id !== postId))
+    setPostsNextOffset((off) => (off === null ? null : Math.max(0, off - 1)))
+    void loadShow()
+  }, [loadShow])
+
   const loadStoryFeed = useCallback(async () => {
     try {
       const res = await apiClient.storyFeed()
@@ -238,14 +294,18 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
     if (isSelf) void loadStoryFeed()
   }, [loadShow, loadPosts, loadStoryFeed, isSelf])
 
-  // light poll while the card is open: stats + story state stay honest
+  // light poll while the card is open: stats + grid + story state stay honest
+  // even if the socket goes quiet. 30s (not faster): every poll re-renders a
+  // large glass dialog, and sustained re-renders are what pressure weak GPUs
   useEffect(() => {
     const t = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
       void loadShow()
+      void refreshPosts()
       if (isSelf) void loadStoryFeed()
-    }, 15000)
+    }, 30000)
     return () => clearInterval(t)
-  }, [loadShow, loadStoryFeed, isSelf])
+  }, [loadShow, loadStoryFeed, refreshPosts, isSelf])
 
   // live refresh: the api routes broadcast profile:refresh through the
   // realtime service; react when it concerns the open profile or my tray
@@ -259,7 +319,7 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
           : null
       if (eventUsername && eventUsername === username) {
         void loadShow()
-        void loadPosts(0, true)
+        void refreshPosts()
       }
       if (isSelf) void loadStoryFeed()
     }
@@ -267,7 +327,7 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
     return () => {
       sock.off('profile:refresh', handler)
     }
-  }, [username, isSelf, loadShow, loadPosts, loadStoryFeed])
+  }, [username, isSelf, loadShow, refreshPosts, loadStoryFeed])
 
   if (!profileUser) return null
 
@@ -275,7 +335,7 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
   const visibleStatus = online ? presenceStatuses[profileUser.id] ?? 'online' : 'offline'
   const awayStamp = online && visibleStatus === 'idle' ? awaySince[profileUser.id] : undefined
   const lastSeenIso = !online ? lastSeen[profileUser.id] : undefined
-  const mutualServers = (profileUser as { mutualServers?: { id: string; name: string; iconUrl: string | null }[] }).mutualServers ?? []
+  const mutualServers = (profileUser as { mutualServers?: string[] }).mutualServers ?? []
 
   // moderation context: the profile must belong to a member of the server I am viewing
   const server = activeServerId ? servers.find((s) => s.id === activeServerId) : null
@@ -503,10 +563,10 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
               {profileUser.role === 'ADMIN' && (
                 <span
                   className="flex items-center gap-1 text-[10px] font-bold tracking-wider text-hyper bg-hyper/10 border border-hyper/40 px-1.5 py-0.5 rounded-sm"
-                  title="administers the entire HyperChat platform, beyond any single server"
+                  title="administers the entire Hyperion platform, beyond any single server"
                 >
                   <Shield className="size-3" />
-                  HYPERCHAT ADMIN
+                  HYPERION ADMIN
                 </span>
               )}
               {isServerOwner && (
@@ -553,7 +613,7 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
                 type="button"
                 onClick={() => setTab('posts')}
                 className="py-2.5 hover:bg-app-raise transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hyper/70"
-                aria-label={`${stats.posts} posts`}
+                aria-label={`${stats.posts} ${stats.posts === 1 ? 'post' : 'posts'}`}
               >
                 <span className="block text-base font-bold tabular-nums">{stats.posts}</span>
                 <span className="block text-[10px] font-bold tracking-widest text-muted-foreground">posts</span>
@@ -562,7 +622,7 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
                 type="button"
                 onClick={() => setFollowList('followers')}
                 className="py-2.5 hover:bg-app-raise transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hyper/70"
-                aria-label={`${stats.followers} followers`}
+                aria-label={`${stats.followers} ${stats.followers === 1 ? 'follower' : 'followers'}`}
               >
                 <span className="block text-base font-bold tabular-nums">{stats.followers}</span>
                 <span className="block text-[10px] font-bold tracking-widest text-muted-foreground">followers</span>
@@ -615,6 +675,38 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
                 >
                   <MessageSquare className="size-4" />
                   message
+                </Button>
+              )}
+              {!isBlocked && (
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="rounded-sm shrink-0"
+                  onClick={() => {
+                    sounds.play('lightTick')
+                    onClose()
+                    void useChatStore.getState().callUser(profileUser.id)
+                  }}
+                  aria-label={`call ${profileUser.username}`}
+                  title="voice call"
+                >
+                  <Phone className="size-4" />
+                </Button>
+              )}
+              {!isBlocked && (
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="rounded-sm shrink-0"
+                  onClick={() => {
+                    sounds.play('lightTick')
+                    onClose()
+                    void useChatStore.getState().callUser(profileUser.id, true)
+                  }}
+                  aria-label={`video call ${profileUser.username}`}
+                  title="video call"
+                >
+                  <Video className="size-4" />
                 </Button>
               )}
             </div>
@@ -715,23 +807,7 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
                     <Users className="size-3" />
                     mutual servers
                   </p>
-                  <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                    {mutualServers.map((s) => (
-                      <span
-                        key={s.id}
-                        title={s.name}
-                        className="size-7 rounded-sm overflow-hidden border border-white/10 grid place-items-center bg-app-raise"
-                      >
-                        {s.iconUrl ? (
-                          <img src={s.iconUrl} alt={s.name} className="size-full object-cover" draggable={false} />
-                        ) : (
-                          <span className="text-[9px] font-bold text-muted-foreground">
-                            {s.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
-                          </span>
-                        )}
-                      </span>
-                    ))}
-                  </div>
+                  <p className="text-xs text-foreground/80 mt-0.5 truncate">{mutualServers.join(', ')}</p>
                 </div>
               )}
 
@@ -978,10 +1054,7 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
           postId={openPostId}
           meId={me?.id ?? null}
           onClose={() => setOpenPostId(null)}
-          onDeleted={() => {
-            void loadShow()
-            void loadPosts(0, true)
-          }}
+          onDeleted={() => removePost(openPostId)}
           onOpenProfile={(u) => void useChatStore.getState().openProfile(u)}
         />
       )}
@@ -1003,7 +1076,7 @@ function ProfileCardBody({ onClose, onAvatarLightbox, isBlocked }: BodyProps & {
           onClose={() => setCreatePostOpen(false)}
           onCreated={() => {
             void loadShow()
-            void loadPosts(0, true)
+            void refreshPosts()
           }}
         />
       )}

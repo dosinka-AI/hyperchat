@@ -5,7 +5,7 @@ import { notFound, serverError, unauthorized } from '@/lib/realtime'
 
 type Params = { params: Promise<{ code: string }> }
 
-/** Resolve a shareable hyperchat.gg/<code> invite into a server preview
+/** Resolve a shareable hyperion.gg/<code> invite into a server preview
  *  for message embeds. Exact code match first; codes are mixed case so a
  *  miss falls back to a case-insensitive scan. */
 export async function GET(_req: NextRequest, { params }: Params) {

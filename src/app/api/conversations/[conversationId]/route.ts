@@ -77,6 +77,40 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           ownerId: updated.ownerId,
           editPolicy: updated.editPolicy,
           invitePolicy: updated.invitePolicy,
+          allowCrossRing: updated.allowCrossRing,
+        },
+      })
+    }
+
+    // ---- cross-ringing (owner only): may members ring people who are NOT
+    //     in this group into its calls? default true. ----
+    if (body.allowCrossRing !== undefined) {
+      if (!isGroup) return forbidden('Only groups have call settings.')
+      if (!iOwn) return forbidden('Only the group owner can change group settings.')
+      const allowed = body.allowCrossRing === true
+      if (allowed === conversation.allowCrossRing) {
+        return NextResponse.json({
+          conversation: {
+            id: conversation.id,
+            kind: conversation.kind,
+            name: conversation.name,
+            ownerId: conversation.ownerId,
+            allowCrossRing: conversation.allowCrossRing,
+          },
+        })
+      }
+      const updated = await db.conversation.update({
+        where: { id: conversationId },
+        data: { allowCrossRing: allowed },
+      })
+      await notifyParticipants(conversationId, { allowCrossRing: allowed })
+      return NextResponse.json({
+        conversation: {
+          id: updated.id,
+          kind: updated.kind,
+          name: updated.name,
+          ownerId: updated.ownerId,
+          allowCrossRing: updated.allowCrossRing,
         },
       })
     }

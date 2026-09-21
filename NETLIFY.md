@@ -12,15 +12,25 @@ posts, likes, comments, follows and 24h stories.
 Netlify's strength is static + serverless; HyperChat is a long-lived Node
 server (websockets + SQLite). two supported shapes:
 
-### shape 1 — full app on a Node host, Netlify for the domain
-1. unzip this archive
-2. push it to a Node host that runs one command (Render / Railway / Fly /
-   a VPS): `bun install && bunx prisma db push && bun run dev` (or build +
-   `bun run start`)
-3. run the realtime sidecar next to it:
-   `cd mini-services/chat-service && bun install && bun run dev`
-   (ports 3000 for the app, 3003/3004 for the sidecar are the defaults)
-4. point Netlify at the host as a proxy, or just use the host's domain
+### shape 1 — full app on a Node host (the full alpha)
+the repo ships a ready-made Docker setup: one container with the app, the
+realtime sidecar and a front proxy, durable data on a /data volume.
+
+1. unzip this archive on the host (Render / Railway / Fly / a VPS)
+2. `cp .env.production.example .env.production` and fill in JWT_SECRET
+   + INTERNAL_TOKEN
+3. `docker compose up -d --build` — the app, sidecar, TLS and persistent
+   storage all come up together
+
+manual, without Docker (build once, one process tree):
+`bun install && bunx prisma generate && bun run build` with
+`NEXT_PUBLIC_SOCKET_PATH=/socket.io`, then
+`DATABASE_URL=file:/abs/path.db UPLOADS_DIR=/abs/uploads JWT_SECRET=... INTERNAL_TOKEN=... NODE_ENV=production PORT=3000 HOSTNAME=127.0.0.1 bun .next/standalone/server.js`
+(the app spawns and supervises the sidecar itself; a reverse proxy must
+route /socket.io/* to port 3003 with the prefix stripped)
+
+the complete runbook - VPS, Fly.io, Railway/Render, bare metal, backups -
+lives in DEPLOY.md.
 
 ### shape 2 — Netlify with the Next runtime
 1. unzip, `netlify deploy --build` (the netlify.toml in this archive is

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#b7e4ff"/>
+      <stop offset="100%" stop-color="#6ab4e8"/>
+    </radialGradient>
+  </defs>
+  <!-- body -->
+  <ellipse cx="80" cy="92" rx="52" ry="46" fill="url(#glow)" stroke="#2d6a94" stroke-width="3"/>
+  <!-- ears -->
+  <path d="M38 60 L30 28 L62 46 Z" fill="url(#glow)" stroke="#2d6a94" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M122 60 L130 28 L98 46 Z" fill="url(#glow)" stroke="#2d6a94" stroke-width="3" stroke-linejoin="round"/>
+  <!-- droopy sleepy eyes -->
+  <path d="M54 88 q10 6 20 0" fill="none" stroke="#173a52" stroke-width="4" stroke-linecap="round"/>
+  <path d="M86 88 q10 6 20 0" fill="none" stroke="#173a52" stroke-width="4" stroke-linecap="round"/>
+  <!-- tiny yawning mouth -->
+  <ellipse cx="80" cy="106" rx="7" ry="9" fill="#173a52"/>
+  <!-- z z z -->
+  <text x="108" y="42" font-family="monospace" font-weight="bold" font-size="20" fill="#6ab4e8">z</text>
+  <text x="122" y="30" font-family="monospace" font-weight="bold" font-size="14" fill="#9ecfec">z</text>
+  <text x="134" y="21" font-family="monospace" font-weight="bold" font-size="10" fill="#c9e7f7">z</text>
+</svg>

@@ -4,19 +4,20 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useChatStore } from '@/lib/client/store'
 import { emitTyping, emitTypingStop } from '@/lib/client/socket'
 import { apiClient, ApiError } from '@/lib/client/api'
-import { formatBytes } from '@/lib/client/format'
+import { formatBytes, formatRemaining } from '@/lib/client/format'
 import { sounds } from '@/lib/client/sounds'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { useToast } from '@/hooks/use-toast'
-import { Paperclip, Send, X, AtSign, Reply as ReplyIcon, Clock, Lock, Gauge, CalendarClock, Check, AlertCircle, FileText, FileArchive, FileAudio, FileVideo, FileSpreadsheet, FileCode, Ghost, Film, Plus, Timer, Bold, Italic, Underline, Strikethrough, Code, Palette, Type, EyeOff, Mic } from 'lucide-react'
+import { Paperclip, Send, X, AtSign, Reply as ReplyIcon, Clock, Lock, Gauge, CalendarClock, Check, AlertCircle, FileText, FileArchive, FileAudio, FileVideo, FileSpreadsheet, FileCode, Ghost, Film, Plus, Timer, Bold, Italic, Underline, Strikethrough, Code, Palette, Type, EyeOff, Mic, Users, TriangleAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { PublicUser } from '@/lib/types'
+import { clientFileWarnings } from '@/lib/client/file-safety'
+import type { MessageAttachment, PublicUser, WhisperListSummary } from '@/lib/types'
 import { PERM, hasPerm } from '@/lib/perm'
 import { renderMessageContent } from '@/lib/client/markdown'
 import { Avatar } from './Avatar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { EmojiPicker, expandShortcodes, exactShortcode, rememberRecent, rememberUsage, searchShortcodes } from './EmojiPicker'
 import { confirmDialog } from './ConfirmDialog'
 import { EmojiText } from '@/lib/client/serverEmoji'
@@ -65,9 +66,20 @@ function applySlashCommands(raw: string): string {
   }
 }
 const MAX_ATTACHMENTS = 5
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-const MAX_FILE_BYTES = 25 * 1024 * 1024
+// one flat 50 MB cap, matching the server: no matter what the file is
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024
+const MAX_FILE_BYTES = 50 * 1024 * 1024
 const IMAGE_MIME_RE = /^image\/(png|jpeg|gif|webp)$/i
+// THE VAULT: chunked ephemeral sends take over in conversations for anything
+// the legacy tray can't carry — every non-image, and images past the tray cap
+const VAULT_MAX_BYTES = 1024 * 1024 * 1024 // server-side hard cap: 1 GiB
+
+/** Upload speed label for the vault strip: MB/s, then KB/s. */
+function vaultSpeedLabel(bytesPerSec: number): string {
+  if (bytesPerSec >= 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`
+  if (bytesPerSec >= 1024) return `${Math.max(1, Math.round(bytesPerSec / 1024))} KB/s`
+  return `${Math.max(1, Math.round(bytesPerSec))} B/s`
+}
 
 /** timed-message windows for 1:1 DMs, offered in the "+" menu: rare
  *  enough to live behind a dropdown instead of a dedicated control */
@@ -223,19 +235,59 @@ export function MessageInput({ room }: { room: string }) {
   const voiceChannel = useMemo(() => createLevelChannel(), [])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // settled once at mount: focus-stealing only belongs where there is a
+  // physical keyboard (tablets and phones open the composer on tap instead)
+  const autoFocusComposer = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
+    []
+  )
 
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+
+  // ---- THE VAULT: chunked ephemeral file sends (DMs/groups) ----
+  // jobs live in the store keyed by conversation, so uploads keep running
+  // through room switches; this composer only shows the ones for its room
+  const vaultJobs = useChatStore((s) => s.vaultJobs)
+  const vaultUploadFile = useChatStore((s) => s.vaultUploadFile)
+  const vaultDropJob = useChatStore((s) => s.vaultDropJob)
+  const vaultRetryJob = useChatStore((s) => s.vaultRetryJob)
+  const vaultConversationId = room.startsWith('conversation:') ? room.slice('conversation:'.length) : null
+  const vaultJobsHere = useMemo(
+    () => (vaultConversationId ? vaultJobs.filter((j) => j.conversationId === vaultConversationId) : []),
+    [vaultJobs, vaultConversationId]
+  )
+  const vaultUploadingAny = vaultJobsHere.some((j) => j.state === 'uploading')
+  const vaultReady = vaultJobsHere.filter((j) => j.state === 'done' && j.uploadId && j.expiresAt)
+  // vault failures that carry a server explanation (the init route's 429
+  // daily-budget wall) get a toast on top of the strip's error chip — the
+  // message itself states the remaining budget. One toast per job key.
+  const toastedVaultKeys = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    for (const job of vaultJobsHere) {
+      if (job.state !== 'error' || !job.error?.startsWith('Daily upload limit')) continue
+      if (toastedVaultKeys.current.has(job.key)) continue
+      toastedVaultKeys.current.add(job.key)
+      sounds.play('error')
+      toast({ title: 'daily upload limit', description: job.error })
+    }
+  }, [vaultJobsHere, toast])
   const [emojiQuery, setEmojiQuery] = useState<string | null>(null)
   const [emojiIndex, setEmojiIndex] = useState(0)
   // slash palette: live while the draft is "/word" with no space yet
   const [slashDismissed, setSlashDismissed] = useState<string | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
-  // whisper mode: a toggle + target, not a command. Every message goes as a
-  // private aside to this member until it is turned back off.
-  const [whisperTarget, setWhisperTarget] = useState<PublicUser | null>(null)
+  // whisper mode: a toggle + targets, not a command. Every message goes as a
+  // private aside to these members (one row per person) until it is turned
+  // back off. 0 selected = off, exactly like before the multi-select.
+  const [whisperTargets, setWhisperTargets] = useState<PublicUser[]>([])
+  // the whisper picker panel ("+" menu -> whisper): candidate chips, saved
+  // lists and the save-a-list input all live in it
+  const [whisperOpen, setWhisperOpen] = useState(false)
+  const [whisperSaveOpen, setWhisperSaveOpen] = useState(false)
+  const [whisperListName, setWhisperListName] = useState('')
   // "+" menu -> picker open request (bump `at` to open in a mode)
-  const [pickerRequest, setPickerRequest] = useState<{ mode: 'emoji' | 'gifs'; at: number } | undefined>()
+  const [pickerRequest, setPickerRequest] = useState<{ mode: 'emoji' | 'gifs' | 'stickers'; at: number } | undefined>()
 
   // mic capture support is a browser fact: settled after mount so the
   // server tree (no mic button) hydrates identically, then the button
@@ -370,7 +422,23 @@ export function MessageInput({ room }: { room: string }) {
         sounds.play('error')
         return
       }
-      await sendMessage({ imageUrl: first.url, content: query || undefined })
+      // whisper mode: the gif rides the private line too (one row per
+      // target for a multi-whisper, exactly like text sends)
+      if (whisperTargets.length > 1) {
+        for (const t of whisperTargets) {
+          try {
+            await sendMessage({ imageUrl: first.url, content: query || undefined, whisperTo: t.username.toLowerCase() })
+          } catch {
+            // the failed row carries its own retry UI
+          }
+        }
+        return
+      }
+      await sendMessage({
+        imageUrl: first.url,
+        content: query || undefined,
+        whisperTo: whisperTargets.length === 1 ? whisperTargets[0].username.toLowerCase() : undefined,
+      })
     } catch {
       sounds.play('error')
       toast({ title: 'gif search failed' })
@@ -416,8 +484,23 @@ export function MessageInput({ room }: { room: string }) {
         ? `rolled ${dice}: **${total}**`
         : `rolled ${dice}: ${rolls.join(' + ')} = **${total}**`
     clearComposer()
+    // whisper mode: the roll rides the private line too (one row per
+    // target for a multi-whisper, exactly like text sends)
+    if (whisperTargets.length > 1) {
+      for (const t of whisperTargets) {
+        try {
+          await sendMessage({ content: text, whisperTo: t.username.toLowerCase() })
+        } catch {
+          // the failed row carries its own retry UI
+        }
+      }
+      return
+    }
     try {
-      await sendMessage({ content: text })
+      await sendMessage({
+        content: text,
+        whisperTo: whisperTargets.length === 1 ? whisperTargets[0].username.toLowerCase() : undefined,
+      })
     } catch {
       // the failed row carries its own retry UI
     }
@@ -435,6 +518,66 @@ export function MessageInput({ room }: { room: string }) {
     }
     return []
   }, [activeServerId, serverMembers, me?.id, conversations, activeConversationId])
+
+  // saved whisper lists (multi-whisper presets) + the picker's helpers
+  const whisperLists = useChatStore((s) => s.whisperLists)
+  const addWhisperList = useChatStore((s) => s.addWhisperList)
+  const removeWhisperList = useChatStore((s) => s.removeWhisperList)
+
+  /** Toggle one candidate into the whisper selection (capped at 8). */
+  function toggleWhisperTarget(user: PublicUser) {
+    sounds.play('lightTick')
+    setWhisperTargets((cur) =>
+      cur.some((t) => t.id === user.id)
+        ? cur.filter((t) => t.id !== user.id)
+        : cur.length >= 8
+          ? cur
+          : [...cur, user]
+    )
+  }
+
+  /** One-click preset: a list's members that are whisperable HERE become
+   *  the current selection (the rest of the list is out of reach in this
+   *  room, so it stays behind). */
+  function applyWhisperList(members: PublicUser[]) {
+    if (members.length === 0) return
+    sounds.play('midTick')
+    setWhisperTargets(members.slice(0, 8))
+  }
+
+  /** Save the current selection as a named list (inline input, 2-8 people). */
+  async function saveCurrentWhisperList() {
+    const name = whisperListName.trim()
+    if (!name || whisperTargets.length < 2 || whisperTargets.length > 8) return
+    try {
+      await addWhisperList(name, whisperTargets.map((t) => t.id))
+      sounds.play('midTick')
+      setWhisperListName('')
+      setWhisperSaveOpen(false)
+      toast({ title: 'list saved', description: `"${name}" is ready to reuse.` })
+    } catch (err) {
+      sounds.play('error')
+      toast({ title: 'could not save the list', description: err instanceof ApiError ? err.message : 'Try again.' })
+    }
+  }
+
+  async function removeWhisperListNow(listId: string) {
+    sounds.play('lightTick')
+    try {
+      await removeWhisperList(listId)
+    } catch {
+      sounds.play('error')
+      toast({ title: 'could not delete the list' })
+    }
+  }
+
+  /** which of a saved list's members are whisperable in this room */
+  function listMembersHere(list: WhisperListSummary): PublicUser[] {
+    return list.memberIds
+      .map((id) => whisperCandidates.find((c) => c.id === id))
+      .filter((c): c is PublicUser => !!c)
+      .slice(0, 8)
+  }
 
   // ---- timed messages (1:1 DMs, from the "+" menu) ----
   const setTempExpiry = useChatStore((s) => s.setTempExpiry)
@@ -460,12 +603,12 @@ export function MessageInput({ room }: { room: string }) {
     }
   }
 
-  // the selected target must still be a candidate for this room
+  // the selected targets must still be candidates for this room
   useEffect(() => {
-    if (whisperTarget && !whisperCandidates.some((c) => c.id === whisperTarget.id)) {
-      setWhisperTarget(null)
-    }
-  }, [whisperCandidates, whisperTarget])
+    setWhisperTargets((cur) =>
+      cur.every((t) => whisperCandidates.some((c) => c.id === t.id)) ? cur : cur.filter((t) => whisperCandidates.some((c) => c.id === t.id))
+    )
+  }, [whisperCandidates])
 
   useEffect(() => {
     setMentionIndex(0)
@@ -478,7 +621,9 @@ export function MessageInput({ room }: { room: string }) {
   // clear the reply banner when switching rooms
   useEffect(() => {
     setReplyTo(null)
-    setWhisperTarget(null)
+    setWhisperTargets([])
+    setWhisperOpen(false)
+    setWhisperSaveOpen(false)
   }, [room])
 
   // restore the draft when switching rooms, persist it on every keystroke
@@ -634,8 +779,59 @@ export function MessageInput({ room }: { room: string }) {
     const caption = expandShortcodes(content.trim())
     clearComposer()
     emitTypingStop(room)
+    // whisper mode: the gif rides the private line too (one row per
+    // target for a multi-whisper, exactly like text sends)
+    if (whisperTargets.length > 1) {
+      for (const t of whisperTargets) {
+        try {
+          await sendMessage({ content: caption || undefined, imageUrl: gif.url, whisperTo: t.username.toLowerCase() })
+        } catch {
+          // the failed row carries its own retry UI
+        }
+      }
+      return
+    }
     try {
-      await sendMessage({ content: caption || undefined, imageUrl: gif.url })
+      await sendMessage({
+        content: caption || undefined,
+        imageUrl: gif.url,
+        whisperTo: whisperTargets.length === 1 ? whisperTargets[0].username.toLowerCase() : undefined,
+      })
+    } catch {
+      // the failed row carries its own retry UI
+    }
+  }
+
+  /** Send a picked sticker whole, Discord-style: the sticker row lands as
+   *  its own message (no caption mixing). Server channels only. */
+  async function sendSticker(sticker: { id: string; name: string; url: string }) {
+    if (locked || slowLeft > 0 || timeoutLeftMs > 0) return
+    clearComposer()
+    emitTypingStop(room)
+    // whisper mode: stickers ride the private line too (one row per target
+    // for a multi-whisper, exactly like text sends)
+    if (whisperTargets.length > 1) {
+      for (const t of whisperTargets) {
+        try {
+          await sendMessage({
+            stickerId: sticker.id,
+            stickerName: sticker.name,
+            stickerUrl: sticker.url,
+            whisperTo: t.username.toLowerCase(),
+          })
+        } catch {
+          // the failed row carries its own retry UI
+        }
+      }
+      return
+    }
+    try {
+      await sendMessage({
+        stickerId: sticker.id,
+        stickerName: sticker.name,
+        stickerUrl: sticker.url,
+        whisperTo: whisperTargets.length === 1 ? whisperTargets[0].username.toLowerCase() : undefined,
+      })
     } catch {
       // the failed row carries its own retry UI
     }
@@ -772,7 +968,6 @@ export function MessageInput({ room }: { room: string }) {
     const caption = expandShortcodes(content.trim())
     const ext = type.includes('mp4') ? 'm4a' : 'webm'
     const file = new File([blob], `voice message.${ext}`, { type })
-    const whisperTo = whisperTarget ? whisperTarget.username.toLowerCase() : undefined
     try {
       const res = await apiClient.uploadFile(file)
       // clear only the text; pending tray attachments stay for the next send
@@ -780,20 +975,32 @@ export function MessageInput({ room }: { room: string }) {
       setMentionQuery(null)
       setEmojiQuery(null)
       emitTypingStop(room)
+      const attachments: MessageAttachment[] = [
+        {
+          url: res.url,
+          name: 'voice message',
+          size: res.size,
+          mime: res.type,
+          kind: 'voice',
+          duration: Math.round(duration * 10) / 10,
+          waveform,
+        },
+      ]
+      // multi-whisper: one private row per target, same as text sends
+      if (whisperTargets.length > 1) {
+        for (const t of whisperTargets) {
+          try {
+            await sendMessage({ content: caption || undefined, attachments, whisperTo: t.username.toLowerCase() })
+          } catch {
+            // the failed row carries its own retry UI
+          }
+        }
+        return
+      }
       await sendMessage({
         content: caption || undefined,
-        attachments: [
-          {
-            url: res.url,
-            name: 'voice message',
-            size: res.size,
-            mime: res.type,
-            kind: 'voice',
-            duration: Math.round(duration * 10) / 10,
-            waveform,
-          },
-        ],
-        whisperTo,
+        attachments,
+        whisperTo: whisperTargets.length === 1 ? whisperTargets[0].username.toLowerCase() : undefined,
       })
     } catch {
       toast({ title: 'could not send the voice message', description: 'try again in a moment.' })
@@ -801,7 +1008,9 @@ export function MessageInput({ room }: { room: string }) {
     }
   }
 
-  /** Drop a picked/dropped File into the tray and start its upload right away. */
+  /** Drop a picked/dropped File into the tray and start its upload right away.
+ *  In conversations non-images (and anything over the legacy cap) divert to
+ *  THE VAULT: the chunked, ephemeral, size-tiered path. */
   function intakeFiles(list: FileList | File[]) {
     const incoming = Array.from(list)
     if (incoming.length === 0) return
@@ -818,13 +1027,23 @@ export function MessageInput({ room }: { room: string }) {
     let added = false
     for (const file of accepted) {
       const isImage = IMAGE_MIME_RE.test(file.type)
-      if (!isImage && file.size > MAX_FILE_BYTES) {
-        toast({ title: 'file too large', description: 'files must stay under 25 MB' })
+      // THE VAULT: chunked ephemeral send for everything the legacy tray
+      // can't carry (every non-image in conversations, plus oversized files)
+      if (vaultConversationId && (!isImage || file.size > MAX_FILE_BYTES)) {
+        if (file.size > VAULT_MAX_BYTES) {
+          toast({ title: 'file too large', description: 'vault files cap at 1 GiB.' })
+          continue
+        }
+        void vaultUploadFile(vaultConversationId, file)
         continue
       }
-      // GIFs bypass the downscale, so they must fit the image cap as picked
+      if (!isImage && file.size > MAX_FILE_BYTES) {
+        toast({ title: 'file too large', description: 'files must stay under 50 MB' })
+        continue
+      }
+      // GIFs bypass the downscale, so they must fit the cap as picked
       if (isImage && file.type === 'image/gif' && file.size > MAX_IMAGE_BYTES) {
-        toast({ title: 'file too large', description: 'images must stay under 8 MB' })
+        toast({ title: 'file too large', description: 'files must stay under 50 MB' })
         continue
       }
       const item: PendingAttachment = {
@@ -855,7 +1074,7 @@ export function MessageInput({ room }: { room: string }) {
       if (item.kind === 'image') {
         blob = await processImage(item.file)
         if (blob.size > MAX_IMAGE_BYTES) {
-          toast({ title: 'file too large', description: 'images must stay under 8 MB' })
+          toast({ title: 'file too large', description: 'files must stay under 50 MB' })
           removeItem(item.id)
           return
         }
@@ -945,9 +1164,9 @@ export function MessageInput({ room }: { room: string }) {
    *  the row itself with retry / discard. */
   async function submit() {
     const raw = content.trim()
-    if ((!raw && doneResults.length === 0) || sending) return
+    if ((!raw && doneResults.length === 0 && vaultReady.length === 0) || sending) return
     // uploads settle first: the send button spins until then
-    if (uploadingAny) return
+    if (uploadingAny || vaultUploadingAny) return
     const attachments = doneResults.map((r) => ({ url: r.url, name: r.name, size: r.size, mime: r.type }))
 
     // /nick: a server action, not a message
@@ -970,7 +1189,7 @@ export function MessageInput({ room }: { room: string }) {
     }
 
     // /whisper @user message still works for muscle memory, but the toggle
-    // is the primary path: whisperTarget rides every send while it is on
+    // is the primary path: the selected targets ride every send while on
     let whisperTo: string | undefined
     let body = raw
     const wm = raw.match(/^\/(?:whisper|w)\s+@?([a-z0-9_]+)\s+([\s\S]+)$/i)
@@ -983,13 +1202,72 @@ export function MessageInput({ room }: { room: string }) {
       }
       whisperTo = wm[1].toLowerCase()
       body = wm[2]
-    } else if (whisperTarget) {
-      whisperTo = whisperTarget.username.toLowerCase()
+    } else if (whisperTargets.length > 0) {
+      whisperTo = whisperTargets[0].username.toLowerCase()
     }
 
     const text = expandShortcodes(applySlashCommands(body))
+    // vault files ride normal sends only: multi-whisper splits every send
+    // into per-person private rows, which files can't follow
+    if (vaultReady.length > 0 && whisperTargets.length > 1) {
+      toast({ title: 'files need a normal send', description: 'turn whisper mode off to send vault files.' })
+      return
+    }
     clearComposer()
     emitTypingStop(room)
+    // ---- THE VAULT path: text + tray attachments ride the first message,
+    // then each finished vault file lands as its own row ----
+    if (vaultReady.length > 0) {
+      const store = useChatStore.getState()
+      try {
+        if (body || attachments.length > 0) {
+          await sendMessage({
+            content: body ? text : undefined,
+            attachments: attachments.length > 0 ? attachments : undefined,
+            whisperTo,
+          })
+        }
+      } catch {
+        // the failed text row carries its own retry UI; keep sending files
+      }
+      for (const job of vaultReady) {
+        try {
+          await sendMessage({
+            fileId: job.uploadId!,
+            file: {
+              id: job.uploadId!,
+              filename: job.name,
+              mime: job.mime,
+              size: job.size,
+              status: 'ready',
+              expiresAt: job.expiresAt!,
+            },
+            whisperTo,
+          })
+          // sent: retire the chip, the upload stays alive server-side
+          store.vaultClearJob(job.key)
+        } catch {
+          // keep the chip so the send can be retried when the network recovers
+        }
+      }
+      return
+    }
+    // multi-whisper: one private row PER target - each person only ever sees
+    // their own aside, and so does the author (one row per recipient)
+    if (whisperTargets.length > 1) {
+      for (const t of whisperTargets) {
+        try {
+          await sendMessage({
+            content: body ? text : undefined,
+            attachments: attachments.length > 0 ? attachments : undefined,
+            whisperTo: t.username.toLowerCase(),
+          })
+        } catch {
+          // the failed row carries its own retry UI
+        }
+      }
+      return
+    }
     try {
       await sendMessage({
         content: body ? text : undefined,
@@ -1143,7 +1421,7 @@ export function MessageInput({ room }: { room: string }) {
     }
   }
 
-  const canSend = (!!content.trim() || doneResults.length > 0) && !locked && slowLeft === 0 && timeoutLeftMs === 0
+  const canSend = (!!content.trim() || doneResults.length > 0 || vaultReady.length > 0) && !locked && slowLeft === 0 && timeoutLeftMs === 0
 
   // a locked or timed-out member sees the reason instead of a composer
   const blockedReason = timeoutLeftMs > 0
@@ -1153,7 +1431,7 @@ export function MessageInput({ room }: { room: string }) {
       : null
 
   return (
-    <div className="shrink-0 px-3 sm:px-4 pb-4 pt-1 relative">
+    <div className="shrink-0 px-3 sm:px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-1 relative">
       {/* slash command palette */}
       {slashMatches.length > 0 && (
         <div
@@ -1250,7 +1528,7 @@ export function MessageInput({ room }: { room: string }) {
 
       {/* schedule composer */}
       {showSchedule && (
-        <div className="absolute bottom-full right-3 sm:right-4 mb-2 w-72 bg-popover border border-border rounded-sm shadow-xl p-3 z-20 dialog-in">
+        <div className="absolute bottom-full right-3 sm:right-4 mb-2 w-72 glass-raise border border-border rounded-sm shadow-xl p-3 z-20 dialog-in">
           <div className="flex items-center gap-2 mb-2">
             <CalendarClock className="size-4 text-hyper shrink-0" />
             <p className="text-[13px] font-bold">schedule this message</p>
@@ -1335,25 +1613,325 @@ export function MessageInput({ room }: { room: string }) {
           </div>
         )}
 
-        {/* whisper banner: while the toggle is on, every send is private */}
-        {whisperTarget && (
+        {/* whisper picker ("+" menu -> whisper): candidate chips with
+            multi-select, the saved-lists section and the save-a-list input.
+            Every control is at least 36px tall for touch, and the whole panel
+            rides the composer width so 390px viewports fit it */}
+        {whisperOpen && whisperCandidates.length > 0 && (
+          <div className="px-2 pt-2 pb-1 border-b border-white/10 fade-in" role="dialog" aria-label="whisper picker">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Ghost className="size-3.5 text-hyper shrink-0" aria-hidden="true" />
+              <span className="text-[10px] font-bold tracking-widest text-muted-foreground lowercase select-none">
+                whisper to
+              </span>
+              {whisperTargets.length > 0 && (
+                <span className="text-[10px] font-semibold text-hyper tabular-nums">{whisperTargets.length}/8</span>
+              )}
+              <span className="flex-1" />
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.play('lightTick')
+                  setWhisperOpen(false)
+                  setWhisperSaveOpen(false)
+                }}
+                className="grid place-items-center size-9 -mr-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                aria-label="close the whisper picker"
+                title="close"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {whisperCandidates.map((u) => {
+                const selected = whisperTargets.some((t) => t.id === u.id)
+                const full = whisperTargets.length >= 8
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    disabled={!selected && full}
+                    onClick={() => toggleWhisperTarget(u)}
+                    aria-pressed={selected}
+                    className={cn(
+                      'flex items-center gap-1.5 min-h-9 px-2 rounded-sm border transition-colors',
+                      selected
+                        ? 'border-hyper/60 bg-hyper/15 text-hyper'
+                        : 'border-white/10 text-foreground/80 hover:border-white/25 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed'
+                    )}
+                  >
+                    <Avatar name={u.username} color={u.avatarColor} url={u.avatarUrl} size="sm" />
+                    <span className="text-xs font-medium truncate max-w-32">{u.displayName || u.username}</span>
+                    {selected && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* saved lists: one-click presets, save the current selection,
+                delete the stale ones */}
+            <div className="mt-2 pt-2 border-t border-white/10">
+              <div className="flex items-center gap-1.5 mb-1.5 min-h-9">
+                <Users className="size-3 text-muted-foreground shrink-0" aria-hidden="true" />
+                <span className="text-[10px] font-bold tracking-widest text-muted-foreground lowercase select-none">lists</span>
+                <span className="flex-1" />
+                {whisperSaveOpen ? (
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <input
+                      autoFocus
+                      value={whisperListName}
+                      onChange={(e) => setWhisperListName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void saveCurrentWhisperList()
+                        }
+                      }}
+                      maxLength={32}
+                      placeholder="list name"
+                      className="h-9 w-28 min-w-0 bg-app-chat/60 border border-white/10 rounded-sm px-2 text-xs outline-none focus:border-hyper/60 placeholder:text-muted-foreground"
+                      aria-label="new list name"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-9 rounded-sm press"
+                      disabled={!whisperListName.trim() || whisperTargets.length < 2 || whisperTargets.length > 8}
+                      onClick={() => void saveCurrentWhisperList()}
+                    >
+                      <Check className="size-3.5" /> save
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWhisperSaveOpen(false)
+                        setWhisperListName('')
+                      }}
+                      className="grid place-items-center size-9 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+                      aria-label="cancel saving the list"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sounds.play('lightTick')
+                      setWhisperSaveOpen(true)
+                    }}
+                    disabled={whisperTargets.length < 2}
+                    className="flex items-center gap-1 min-h-9 px-2 rounded-sm border border-white/10 text-[11px] font-semibold text-foreground/80 hover:border-white/25 hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title={whisperTargets.length < 2 ? 'select 2-8 people first' : 'save this selection as a list'}
+                  >
+                    <Plus className="size-3.5" /> save list
+                  </button>
+                )}
+              </div>
+              {whisperLists.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground/80 px-0.5 py-1">no lists yet</p>
+              ) : (
+                <div className="max-h-40 overflow-y-auto scroll-thin flex flex-col gap-1">
+                  {whisperLists.map((list) => {
+                    const here = listMembersHere(list)
+                    return (
+                      <div
+                        key={list.id}
+                        className={cn(
+                          'flex items-stretch gap-1 min-h-9 rounded-sm border border-white/10 hover:border-white/25 transition-colors',
+                          here.length === 0 && 'opacity-50'
+                        )}
+                      >
+                        <button
+                          type="button"
+                          disabled={here.length === 0}
+                          onClick={() => applyWhisperList(here)}
+                          className="flex flex-1 min-w-0 items-center gap-2 px-2 py-1 text-left disabled:cursor-not-allowed"
+                          title={here.length === 0 ? 'nobody from this list is in this room' : `whisper to ${list.memberNames.join(', ')}`}
+                        >
+                          <span className="text-xs font-semibold truncate shrink-0">{list.name}</span>
+                          <span className="text-[10px] text-muted-foreground truncate">{list.memberNames.join(', ')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void removeWhisperListNow(list.id)}
+                          className="grid place-items-center size-9 my-auto rounded-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                          aria-label={`delete the list ${list.name}`}
+                          title={`delete ${list.name}`}
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* whisper banner: while targets are selected, every send is private
+            (one row per person). each chip can be dropped on its own */}
+        {whisperTargets.length > 0 && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/10 text-xs text-muted-foreground fade-in">
             <Ghost className="size-3.5 shrink-0 text-hyper" />
             <span className="shrink-0 font-semibold text-foreground/80">
-              whispering to {whisperTarget.displayName || whisperTarget.username}
+              {whisperTargets.length === 1
+                ? 'whispering to'
+                : `whispering to ${whisperTargets.length} people`}
+            </span>
+            <span className="flex flex-wrap gap-1 min-w-0">
+              {whisperTargets.map((t) => (
+                <span
+                  key={t.id}
+                  className="flex items-center gap-1 min-h-9 px-2 rounded-sm border border-hyper/40 bg-hyper/10 text-hyper"
+                >
+                  <span className="truncate max-w-32">{t.displayName || t.username}</span>
+                  <button
+                    onClick={() => toggleWhisperTarget(t)}
+                    className="grid place-items-center size-9 rounded-sm hover:bg-hyper/20 transition-colors shrink-0"
+                    aria-label={`stop whispering to ${t.displayName || t.username}`}
+                    title={`stop whispering to ${t.displayName || t.username}`}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </span>
+              ))}
             </span>
             <span className="flex-1" />
             <button
               onClick={() => {
                 sounds.play('lightTick')
-                setWhisperTarget(null)
+                setWhisperTargets([])
               }}
-              className="p-1 rounded-sm hover:text-foreground hover:bg-accent transition-colors shrink-0"
+              className="grid place-items-center size-9 -my-1 rounded-sm hover:text-foreground hover:bg-accent transition-colors shrink-0"
               aria-label="stop whispering"
               title="stop whispering"
             >
-              <X className="size-3.5" />
+              <X className="size-4" />
             </button>
+          </div>
+        )}
+
+        {/* THE VAULT strip: chunked ephemeral uploads for this conversation —
+            live progress + speed + cancel while sending, then a pending
+            attachment chip (name + size + expires-in) until the message goes */}
+        {vaultJobsHere.length > 0 && (
+          <div className="flex flex-col gap-1.5 p-2 border-b border-white/10 fade-in">
+            {vaultJobsHere.map((job) => {
+              const Icon = fileIconFor(job.mime, job.name)
+              const pct = job.size > 0 ? Math.min(100, Math.floor((job.uploadedBytes / job.size) * 100)) : 0
+              if (job.state === 'uploading') {
+                return (
+                  <div
+                    key={job.key}
+                    className="flex items-center gap-2.5 rounded-sm border border-white/10 bg-app-chat/50 px-2.5 py-2"
+                  >
+                    <Icon className="size-4 shrink-0 text-hyper" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="truncate text-xs font-medium" title={job.name}>{job.name}</span>
+                        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                          {pct}% · {vaultSpeedLabel(job.speed)}
+                        </span>
+                      </div>
+                      <div
+                        className="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
+                        role="progressbar"
+                        aria-valuenow={pct}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`uploading ${job.name}`}
+                      >
+                        <div className="h-full bg-hyper transition-[width] duration-300" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="mt-0.5 block text-[10px] text-muted-foreground tabular-nums">
+                        {formatBytes(job.uploadedBytes)} / {formatBytes(job.size)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.play('lightTick')
+                        vaultDropJob(job.key)
+                      }}
+                      className="grid size-7 shrink-0 place-items-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                      aria-label={`Cancel upload of ${job.name}`}
+                      title="cancel upload"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                )
+              }
+              if (job.state === 'error') {
+                return (
+                  <div
+                    key={job.key}
+                    className="flex items-center gap-2.5 rounded-sm border border-destructive/50 bg-destructive/5 px-2.5 py-2 cursor-pointer"
+                    onClick={() => vaultRetryJob(job.key)}
+                    title="retry the upload"
+                  >
+                    <Icon className="size-4 shrink-0 text-destructive" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium" title={job.name}>{job.name}</span>
+                      <span className="block truncate text-[10px] text-destructive/90">
+                        {job.error || 'upload failed'} — tap to retry
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        sounds.play('lightTick')
+                        vaultDropJob(job.key)
+                      }}
+                      className="grid size-7 shrink-0 place-items-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                      aria-label={`Discard failed upload ${job.name}`}
+                      title="discard"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                )
+              }
+              return (
+                <div
+                  key={job.key}
+                  className="flex items-center gap-2.5 rounded-sm border border-hyper/40 bg-hyper/10 px-2.5 py-2 fade-in"
+                >
+                  <Icon className="size-4 shrink-0 text-hyper" aria-hidden="true" />
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium" title={job.name}>{job.name}</span>
+                    <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span className="shrink-0">{formatBytes(job.size)}</span>
+                      <span className="font-semibold text-hyper">expires in {formatRemaining(job.expiresAt ?? '')}</span>
+                      {clientFileWarnings(job.name).length > 0 && (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded-sm border border-amber-400/30 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-amber-400"
+                          title="executable or suspicious file type"
+                        >
+                          <TriangleAlert className="size-2.5" aria-hidden="true" />
+                          careful
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <Check className="size-3.5 shrink-0 text-hyper" aria-hidden="true" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sounds.play('lightTick')
+                      vaultDropJob(job.key)
+                    }}
+                    className="grid size-7 shrink-0 place-items-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                    aria-label={`Remove ${job.name} from this message`}
+                    title="remove attachment"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -1590,7 +2168,7 @@ export function MessageInput({ room }: { room: string }) {
           />
           <button
             onClick={() => fileRef.current?.click()}
-            className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+            className="p-2 max-md:p-2.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
             aria-label="attach files"
             title="attach files"
           >
@@ -1600,7 +2178,10 @@ export function MessageInput({ room }: { room: string }) {
           <textarea
             ref={textareaRef}
             value={content}
-            autoFocus
+            // desktop keeps the composer focused for fast typing; on phones
+            // an autofocus would slam the virtual keyboard over the chat on
+            // every channel switch, so it stays closed until the user taps
+            autoFocus={autoFocusComposer}
             onChange={(e) => {
               const el = e.target
               const caret = el.selectionStart ?? el.value.length
@@ -1630,7 +2211,13 @@ export function MessageInput({ room }: { room: string }) {
               // delay so click-on-suggestion still registers
               setTimeout(() => setMentionQuery((q) => (mentionMatches.length ? q : null)), 120)
             }}
-            placeholder={whisperTarget ? `whisper to ${whisperTarget.displayName || whisperTarget.username}` : 'message'}
+            placeholder={
+              whisperTargets.length === 1
+                ? `whisper to ${whisperTargets[0].displayName || whisperTargets[0].username}`
+                : whisperTargets.length > 1
+                  ? `whisper to ${whisperTargets.length} people`
+                  : 'message'
+            }
             rows={1}
             className="chat-font flex-1 resize-none bg-transparent outline-none leading-6 placeholder:text-muted-foreground max-h-40 py-1.5 scroll-thin"
             aria-label="message input"
@@ -1644,7 +2231,7 @@ export function MessageInput({ room }: { room: string }) {
               type="button"
               onClick={() => void startVoiceRecording()}
               disabled={locked}
-              className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="p-2 max-md:p-2.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="record a voice message"
               title="voice message"
             >
@@ -1660,7 +2247,7 @@ export function MessageInput({ room }: { room: string }) {
               sounds.play('lightTick')
               setPickerRequest({ mode: 'gifs', at: Date.now() })
             }}
-            className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+            className="p-2 max-md:p-2.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
             aria-label="send a GIF"
             title="send a GIF"
           >
@@ -1668,7 +2255,7 @@ export function MessageInput({ room }: { room: string }) {
           </button>
 
           {/* emoji picker: one popover, two tabs */}
-          <EmojiPicker onPick={insertEmoji} onGif={(gif) => void sendGif(gif)} openRequest={pickerRequest} />
+          <EmojiPicker onPick={insertEmoji} onGif={(gif) => void sendGif(gif)} onSticker={inServerChannel ? (st) => void sendSticker(st) : undefined} openRequest={pickerRequest} />
 
           {/* the "+" menu: the rare send options (schedule, whisper,
               timed messages) live behind one button instead of crowding
@@ -1677,8 +2264,8 @@ export function MessageInput({ room }: { room: string }) {
             <DropdownMenuTrigger asChild>
               <button
                 className={cn(
-                  'p-2 rounded-sm transition-colors shrink-0',
-                  showSchedule || whisperTarget || !!conversation?.tempExpiryMinutes
+                  'p-2 max-md:p-2.5 rounded-sm transition-colors shrink-0',
+                  showSchedule || whisperTargets.length > 0 || whisperOpen || !!conversation?.tempExpiryMinutes
                     ? 'text-hyper hover:bg-hyper/10'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                 )}
@@ -1709,32 +2296,16 @@ export function MessageInput({ room }: { room: string }) {
                 <Palette className="size-4" /> advanced formatting
               </DropdownMenuItem>
               {whisperCandidates.length > 0 && (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger className="rounded-sm cursor-pointer">
-                    <Ghost className="size-4" /> whisper
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-56 rounded-sm p-1">
-                    <div className="max-h-64 overflow-y-auto scroll-thin">
-                      {whisperCandidates.map((u) => (
-                        <DropdownMenuItem
-                          key={u.id}
-                          onClick={() => {
-                            sounds.play('lightTick')
-                            setWhisperTarget(whisperTarget?.id === u.id ? null : u)
-                          }}
-                          className="rounded-sm cursor-pointer gap-2.5 px-2 py-1.5"
-                        >
-                          <Avatar name={u.username} color={u.avatarColor} url={u.avatarUrl} size="sm" />
-                          <span className="min-w-0 flex-1 leading-tight">
-                            <span className="block truncate text-sm font-medium">{u.displayName || u.username}</span>
-                            <span className="block truncate text-[11px] text-muted-foreground">@{u.username}</span>
-                          </span>
-                          {whisperTarget?.id === u.id && <Check className="size-3.5 text-hyper shrink-0" />}
-                        </DropdownMenuItem>
-                      ))}
-                    </div>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
+                <DropdownMenuItem
+                  onClick={() => {
+                    sounds.play('lightTick')
+                    setWhisperOpen((o) => !o)
+                    setWhisperSaveOpen(false)
+                  }}
+                  className="rounded-sm cursor-pointer"
+                >
+                  <Ghost className="size-4" /> whisper
+                </DropdownMenuItem>
               )}
               {isDmConversation && (
                 <>
@@ -1763,7 +2334,7 @@ export function MessageInput({ room }: { room: string }) {
           <Button
             size="sm"
             className="mb-0.5 shrink-0 rounded-sm press"
-            disabled={!canSend || uploadingAny}
+            disabled={!canSend || uploadingAny || vaultUploadingAny}
             onClick={() => {
               void submit()
               // clicking send must not eat the focus for the next message
@@ -1771,7 +2342,7 @@ export function MessageInput({ room }: { room: string }) {
             }}
             aria-label="send message"
           >
-            {sending || uploadingAny ? <Spinner /> : <Send className="size-4" />}
+            {sending || uploadingAny || vaultUploadingAny ? <Spinner /> : <Send className="size-4" />}
           </Button>
         </div>
         )}

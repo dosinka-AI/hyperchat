@@ -47,7 +47,7 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
   async function copyShareLink() {
     if (!code) return
     try {
-      await navigator.clipboard.writeText(`hyperchat.gg/${code}`)
+      await navigator.clipboard.writeText(`hyperion.gg/${code}`)
       sounds.play('glassTick')
       setShareCopied(true)
       toast({ title: 'copied' })
@@ -109,7 +109,7 @@ export function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
             aria-label="copy shareable invite link"
             title="click to copy"
           >
-            <span className="truncate font-mono">hyperchat.gg/{code || 'xxxxxxxx'}</span>
+            <span className="truncate font-mono">hyperion.gg/{code || 'xxxxxxxx'}</span>
             {shareCopied ? <Check className="size-3.5 shrink-0" /> : <Copy className="size-3.5 shrink-0" />}
           </button>
           <p className="text-[11px] text-muted-foreground">click to copy. pasting it in a message shows an invite card.</p>

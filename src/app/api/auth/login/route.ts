@@ -14,9 +14,22 @@ export async function POST(req: NextRequest) {
 
     const user = await db.user.findFirst({
       where: { OR: [{ email: identifier }, { username: identifier }] },
+      include: { siteBan: { select: { reason: true } } },
     })
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       return NextResponse.json({ error: 'Wrong credentials. Check your login and password.' }, { status: 401 })
+    }
+
+    // site ban (Task 6-c): a UserBan row means the account is suspended —
+    // no new session, no token minted
+    if (user.siteBan) {
+      return NextResponse.json(
+        {
+          error: 'account suspended',
+          reason: user.siteBan.reason ?? null,
+        },
+        { status: 403 }
+      )
     }
 
     // suspended accounts cannot start a new session
@@ -45,6 +58,7 @@ export async function POST(req: NextRequest) {
         avatarColor: user.avatarColor,
         bio: user.bio,
         role: user.role,
+        siteAdmin: user.siteAdmin,
         customStatus: user.customStatus,
         pronouns: user.pronouns,
         presence: user.presence,

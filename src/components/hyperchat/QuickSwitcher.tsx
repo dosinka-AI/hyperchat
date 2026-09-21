@@ -108,7 +108,7 @@ export function QuickSwitcher({ open, onOpenChange }: { open: boolean; onOpenCha
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md p-0 border-border bg-app-sidebar overflow-hidden rounded-sm top-6 translate-y-0" aria-describedby={undefined}>
+      <DialogContent className="max-w-md p-0 border-border glass overflow-hidden rounded-sm top-6 translate-y-0" aria-describedby={undefined}>
         <DialogTitle className="sr-only">quick switcher</DialogTitle>
         <div className="p-3 border-b border-white/10">
           <input

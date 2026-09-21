@@ -1,5 +1,5 @@
 /**
- * Built-in reaction GIF catalog for HyperChat.
+ * Built-in reaction GIF catalog for Hyperion.
  *
  * Every entry is a real Giphy CDN URL (media.giphy.com/media/<ID>/giphy.gif)
  * whose ID was verified against the CDN at curation time, so the picker grid

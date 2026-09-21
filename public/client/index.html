@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>hyperion · find the server</title>
+<style>
+  :root {
+    --bg: #060606;
+    --raise: #121212;
+    --line: rgba(255, 255, 255, 0.08);
+    --txt: #f2f2f2;
+    --dim: #9b9b9b;
+    --dim2: #6d6d6d;
+    --hyper: #547cff;
+    --online: #23a55a;
+    --bad: #f23f43;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { height: 100%; }
+  body {
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--txt);
+    font-family: var(--sans);
+    display: flex;
+    flex-direction: column;
+  }
+  main {
+    flex: 1 0 auto;
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 48px 20px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  header .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--dim2);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header .dot {
+    width: 8px; height: 8px; border-radius: 999px;
+    background: var(--online);
+    box-shadow: 0 0 10px rgba(35, 165, 90, 0.8);
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  h1 { margin-top: 14px; font-size: 26px; letter-spacing: -0.02em; font-weight: 800; }
+  header p.sub { margin-top: 8px; color: var(--dim); font-size: 14px; line-height: 1.55; max-width: 52ch; }
+
+  .card {
+    background: var(--raise);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 18px;
+  }
+  .card .label {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--dim2);
+  }
+  #addr {
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 700;
+    word-break: break-all;
+    line-height: 1.45;
+    min-height: 26px;
+  }
+  #addr.ok { color: var(--online); }
+  #addr.err { color: var(--bad); font-size: 14px; font-weight: 600; }
+  #addr.load { color: var(--dim); font-weight: 500; }
+  #hint { margin-top: 8px; font-size: 12.5px; color: var(--dim); line-height: 1.5; display: none; }
+  #hint.warn { display: block; color: #e8c268; }
+  #hint.bad { display: block; color: #ff8a8d; }
+  #meta { margin-top: 12px; font-size: 11.5px; color: var(--dim2); font-variant-numeric: tabular-nums; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 5px;
+    min-height: 44px; padding: 0 18px;
+    display: inline-flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 14px;
+    transition: filter 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+    border: 1px solid transparent;
+  }
+  button:focus-visible { outline: 2px solid var(--hyper); outline-offset: 2px; }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .primary { background: var(--hyper); color: #fff; }
+  .primary:hover:not(:disabled) { filter: brightness(1.12); }
+  .ghost { background: transparent; color: var(--txt); border-color: var(--line); }
+  .ghost:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.25); }
+  .ghost.small { min-height: 36px; padding: 0 12px; font-size: 12.5px; color: var(--dim); font-weight: 600; }
+
+  details.src summary {
+    cursor: pointer; list-style: none; color: var(--dim2);
+    font-size: 12px; font-weight: 600; min-height: 36px;
+    display: inline-flex; align-items: center; gap: 6px;
+    border-radius: 4px;
+  }
+  details.src summary::-webkit-details-marker { display: none; }
+  details.src summary:focus-visible { outline: 2px solid var(--hyper); outline-offset: 2px; }
+  details.src summary:hover { color: var(--dim); }
+  details.src .row { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type="url"] {
+    flex: 1 1 260px; min-height: 44px; padding: 0 12px;
+    background: var(--bg); color: var(--txt);
+    border: 1px solid var(--line); border-radius: 5px;
+    font-family: var(--mono); font-size: 12.5px;
+  }
+  input[type="url"]:focus { outline: none; border-color: var(--hyper); }
+  input[type="url"]::placeholder { color: var(--dim2); }
+  details.src p { margin-top: 10px; font-size: 12px; color: var(--dim2); line-height: 1.55; }
+
+  footer {
+    flex-shrink: 0;
+    border-top: 1px solid var(--line);
+    padding: 18px 20px;
+    text-align: center;
+    font-size: 11.5px;
+    color: var(--dim2);
+    line-height: 1.6;
+  }
+  footer .fmono { font-family: var(--mono); font-size: 11px; }
+  @media (max-width: 480px) {
+    main { padding-top: 36px; }
+    h1 { font-size: 22px; }
+    #addr { font-size: 15px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    header .dot { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow"><span class="dot" aria-hidden="true"></span> hyperion client</div>
+      <h1>find the server</h1>
+      <p class="sub">
+        this page reads the owner's server.txt on github — the one place the current
+        server address always lives. the address changes when the tunnel restarts;
+        the txt never does.
+      </p>
+    </header>
+
+    <section class="card" aria-label="current server address" aria-live="polite">
+      <div class="label">current address</div>
+      <div id="addr" class="load">reading the txt…</div>
+      <p id="hint" role="note"></p>
+      <p id="meta"></p>
+    </section>
+
+    <div class="actions" aria-label="actions">
+      <button id="open" class="primary" disabled>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>
+        open hyperion
+      </button>
+      <button id="copy" class="ghost" disabled>copy address</button>
+      <button id="refresh" class="ghost">
+        <svg id="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        refresh
+      </button>
+    </div>
+
+    <details class="src">
+      <summary><span aria-hidden="true">⌄</span> which txt does this page read?</summary>
+      <div class="row">
+        <input id="srcurl" type="url" placeholder="https://raw.githubusercontent.com/…/server.txt" aria-label="github txt URL to read" spellcheck="false" />
+        <button id="save" class="ghost small">save</button>
+        <button id="reset" class="ghost small">reset to default</button>
+      </div>
+      <p>
+        paste the raw link to any server.txt and this page follows it instead. saved on this
+        device only. first line of the txt = the address (a full https link, or host:port).
+      </p>
+    </details>
+  </main>
+
+  <footer>
+    a hyperion client page — static, no server of its own, it only reads the txt.<br />
+    <span class="fmono">upload once to github pages · share this link · it follows the txt forever</span>
+  </footer>
+
+<script>
+(function () {
+  'use strict'
+  var DEFAULT_SRC = 'https://raw.githubusercontent.com/dosinka-AI/hyperchat/refs/heads/main/server.txt'
+  var LS_KEY = 'hyperion.client.src'
+  var state = { addr: null, busy: false, checkedAt: null }
+
+  var $ = function (id) { return document.getElementById(id) }
+  var elAddr = $('addr'), elHint = $('hint'), elMeta = $('meta')
+  var elOpen = $('open'), elCopy = $('copy'), elRefresh = $('refresh')
+  var elSrc = $('srcurl'), elSave = $('save'), elReset = $('reset'), elSpin = $('spin')
+
+  function src() {
+    try {
+      var v = localStorage.getItem(LS_KEY)
+      return v && /^https?:\/\//.test(v) ? v : DEFAULT_SRC
+    } catch (e) { return DEFAULT_SRC }
+  }
+
+  function hint(cls, text) {
+    if (!text) { elHint.className = ''; elHint.textContent = ''; return }
+    elHint.className = cls; elHint.textContent = text
+  }
+
+  function ago(ms) {
+    var s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
+    if (s < 5) return 'just now'
+    if (s < 60) return s + 's ago'
+    if (s < 3600) return Math.floor(s / 60) + 'm ago'
+    return Math.floor(s / 3600) + 'h ago'
+  }
+
+  // first non-empty line; full http(s) URL passes, bare host[:port] → https://
+  function parseLine(text) {
+    var lines = text.split('\n')
+    for (var i = 0; i < lines.length; i++) {
+      var v = lines[i].trim()
+      if (!v) continue
+      if (v.length > 2000) return null
+      if (/^https?:\/\/\S+$/i.test(v)) return v
+      if (/^[a-zA-Z0-9][a-zA-Z0-9.-]*(:\d{1,5})?$/.test(v)) return 'https://' + v
+      return null
+    }
+    return null
+  }
+
+  function setBusy(b) {
+    state.busy = b
+    elRefresh.disabled = b
+    elSpin.style.animation = b ? 'spin 0.9s linear infinite' : ''
+  }
+
+  function render(addr, err) {
+    elOpen.disabled = !addr
+    elCopy.disabled = !addr
+    if (addr) {
+      state.addr = addr
+      elAddr.className = 'ok'
+      elAddr.textContent = addr
+      var ph = /serveraddress/i.test(addr)
+      hint(ph ? 'warn' : '', ph
+        ? 'the txt still holds the placeholder — the owner has not pasted a real address in yet. try again later.'
+        : '')
+    } else {
+      state.addr = null
+      elAddr.className = err ? 'err' : 'load'
+      elAddr.textContent = err || 'reading the txt…'
+      if (err) hint('bad', 'could not read the txt just now. it may be offline or the link changed — use refresh to retry.')
+      else hint('')
+    }
+    elMeta.textContent = state.checkedAt ? 'read ' + ago(state.checkedAt) : ''
+  }
+
+  function refresh() {
+    if (state.busy) return
+    setBusy(true)
+    render(null, null)
+    var url = src()
+    var bust = url + (url.indexOf('?') === -1 ? '?' : '&') + 't=' + Math.floor(Date.now() / 1000)
+    var ctrl = new AbortController()
+    var timer = setTimeout(function () { ctrl.abort() }, 10000)
+    state.checkedAt = Date.now()
+    fetch(bust, { cache: 'no-store', signal: ctrl.signal })
+      .then(function (r) {
+        if (!r.ok) throw new Error('the txt answered ' + r.status)
+        return r.text()
+      })
+      .then(function (text) {
+        clearTimeout(timer)
+        var addr = parseLine(text)
+        if (addr) render(addr, null)
+        else render(null, 'the txt does not contain an address (first line must be the address)')
+      })
+      .catch(function (err) {
+        clearTimeout(timer)
+        var msg = err && err.name === 'AbortError'
+          ? 'the txt took too long to answer (10s timeout)'
+          : (err && err.message) || 'could not reach the txt'
+        render(null, msg)
+      })
+      .then(function () { setBusy(false) })
+  }
+
+  function saveSrc(v, andRefresh) {
+    v = (v || '').trim()
+    if (v && !/^https?:\/\//i.test(v)) { hint('bad', 'that does not look like a link — it needs to start with http.'); return false }
+    try {
+      if (v) localStorage.setItem(LS_KEY, v)
+      else localStorage.removeItem(LS_KEY)
+    } catch (e) { /* private mode etc — keep the default */ }
+    elSrc.value = v || DEFAULT_SRC
+    hint('')
+    if (andRefresh) refresh()
+    return true
+  }
+
+  elOpen.addEventListener('click', function () { if (state.addr) window.open(state.addr, '_self') })
+  elRefresh.addEventListener('click', refresh)
+
+  elCopy.addEventListener('click', function () {
+    if (!state.addr) return
+    var done = function () {
+      elCopy.textContent = 'copied ✓'
+      setTimeout(function () { elCopy.textContent = 'copy address' }, 1400)
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(state.addr).then(done, function () {})
+    } else {
+      var ta = document.createElement('textarea')
+      ta.value = state.addr
+      ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta); ta.select()
+      try { document.execCommand('copy'); done() } catch (e) {}
+      document.body.removeChild(ta)
+    }
+  })
+
+  elSave.addEventListener('click', function () {
+    var v = elSrc.value.trim()
+    if (saveSrc(v, true)) {
+      elSave.textContent = 'saved ✓'
+      setTimeout(function () { elSave.textContent = 'save' }, 1400)
+    }
+  })
+  elReset.addEventListener('click', function () { saveSrc('', true) })
+  elSrc.addEventListener('keydown', function (e) { if (e.key === 'Enter') elSave.click() })
+
+  var style = document.createElement('style')
+  style.textContent = '@keyframes spin{to{transform:rotate(360deg)}}'
+  document.head.appendChild(style)
+
+  elSrc.value = src()
+  refresh()
+  // keep the address honest while the page sits open (quiet, once a minute)
+  setInterval(function () { if (!state.busy) refresh() }, 60000)
+})()
+</script>
+</body>
+</html>

@@ -8,7 +8,7 @@ import { Avatar } from './Avatar'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
-import { Hash, Menu, Users, Pin, Search, AtSign, Pencil, Check, X, Lock, Gauge, Settings2, Trash2, UserRound, UserPlus, LogOut, ArrowLeft, Keyboard, Image as ImageIcon, ImageOff, Phone, Video } from 'lucide-react'
+import { Hash, Menu, Users, Pin, Search, AtSign, Pencil, Check, X, Lock, Gauge, Settings2, Trash2, UserRound, UserPlus, LogOut, ArrowLeft, Keyboard, Image as ImageIcon, ImageOff, Phone, PhoneCall, Video } from 'lucide-react'
 import { RainbowSparkFilled } from './SummarizeDialog'
 import { awayForLabel } from './MessageList'
 import { PERM } from '@/lib/perm'
@@ -70,6 +70,9 @@ export function ChatHeader({
   const canManageChannels = (myPerms & (PERM.ADMINISTRATOR | PERM.MANAGE_CHANNELS)) !== 0
   const conversation = conversations.find((c) => c.id === activeConversationId) ?? null
   const isGroup = conversation?.kind === 'GROUP'
+  // voice channels lost their text surface: chat actions (pins, search,
+  // purge, summarize) have nothing to act on there, so they stay hidden
+  const isVoiceChannel = channel?.type === "voice"
 
   const [editingTopic, setEditingTopic] = useState(false)
   const [topicDraft, setTopicDraft] = useState('')
@@ -87,7 +90,7 @@ export function ChatHeader({
       <header className="h-12 shrink-0 flex items-center px-3 border-b border-white/10 bg-app-sidebar/40 gap-2">
         <button
           onClick={onToggleSidebar}
-          className="p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent md:hidden"
+          className="p-2 max-md:p-2.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent md:hidden"
           aria-label="toggle channel list"
         >
           <Menu className="size-5" />
@@ -103,7 +106,7 @@ export function ChatHeader({
     <header className="h-12 shrink-0 flex items-center px-3 border-b border-white/10 bg-app-sidebar/40 gap-2">
       <button
         onClick={onToggleSidebar}
-        className="p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent md:hidden"
+        className="p-2 max-md:p-2.5 -ml-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent md:hidden"
         aria-label="toggle channel list"
       >
         <Menu className="size-5" />
@@ -198,11 +201,11 @@ export function ChatHeader({
               <Users className="size-3.5" />
               {serverMembers[activeServerId ?? '']?.length ?? server?.memberCount ?? 0}
             </span>
-            {canManage && (
+            {canManage && !isVoiceChannel && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 px-2 rounded-sm"
+                className="h-9 max-md:h-11 px-2 rounded-sm"
                 onClick={() => {
                   sounds.play('lightTick')
                   onOpenPurge()
@@ -217,7 +220,7 @@ export function ChatHeader({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 px-2 rounded-sm"
+                className="h-9 max-md:h-11 px-2 rounded-sm"
                 onClick={() => {
                   sounds.play('lightTick')
                   onOpenChannelSettings()
@@ -228,49 +231,55 @@ export function ChatHeader({
                 <Settings2 className="size-4" />
               </Button>
             )}
+            {!isVoiceChannel && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 max-md:h-11 px-2 rounded-sm relative"
+                onClick={() => {
+                  sounds.play('lightTick')
+                  onOpenPins()
+                }}
+                aria-label="pinned messages"
+                title="pinned messages"
+              >
+                <Pin className="size-4" />
+              </Button>
+            )}
+            {!isVoiceChannel && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 max-md:h-11 px-2 rounded-sm"
+                onClick={() => {
+                  sounds.play('lightTick')
+                  onOpenSearch()
+                }}
+                aria-label="search messages"
+                title="search messages"
+              >
+                <Search className="size-4" />
+              </Button>
+            )}
+            {!isVoiceChannel && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 max-md:h-11 px-2 rounded-sm hidden sm:inline-flex"
+                onClick={() => {
+                  sounds.play('lightTick')
+                  onOpenSummary()
+                }}
+                aria-label="summarize recent messages"
+                title="summarize recent messages"
+              >
+                <RainbowSparkFilled className="size-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm relative"
-              onClick={() => {
-                sounds.play('lightTick')
-                onOpenPins()
-              }}
-              aria-label="pinned messages"
-              title="pinned messages"
-            >
-              <Pin className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 rounded-sm"
-              onClick={() => {
-                sounds.play('lightTick')
-                onOpenSearch()
-              }}
-              aria-label="search messages"
-              title="search messages"
-            >
-              <Search className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 rounded-sm"
-              onClick={() => {
-                sounds.play('lightTick')
-                onOpenSummary()
-              }}
-              aria-label="summarize recent messages"
-              title="summarize recent messages"
-            >
-              <RainbowSparkFilled className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 rounded-sm"
+              className="h-9 max-md:h-11 px-2 rounded-sm hidden md:inline-flex"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenShortcuts()
@@ -284,7 +293,7 @@ export function ChatHeader({
               <Button
                 variant={membersOpen ? 'secondary' : 'ghost'}
                 size="sm"
-                className="h-8 px-2 rounded-sm"
+                className="h-9 max-md:h-11 px-2 rounded-sm"
                 onClick={onToggleMembers}
                 aria-label="toggle member list"
                 title="toggle member list"
@@ -303,12 +312,12 @@ export function ChatHeader({
           </span>
 
           <div className="ml-auto flex items-center gap-1 shrink-0">
+            <ConversationCallButtons conversationId={conversation.id} />
             <QuickAddMembers conversation={conversation} />
-            <DmCallButtons conversationId={conversation.id} />
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm"
+              className="h-9 max-md:h-11 px-2 rounded-sm"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenGroupSettings()
@@ -322,7 +331,7 @@ export function ChatHeader({
               <Button
                 variant={membersOpen ? 'secondary' : 'ghost'}
                 size="sm"
-                className="h-8 px-2 rounded-sm"
+                className="h-9 max-md:h-11 px-2 rounded-sm"
                 onClick={onToggleMembers}
                 aria-label="toggle member list"
                 title="toggle member list"
@@ -333,7 +342,7 @@ export function ChatHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm relative"
+              className="h-9 max-md:h-11 px-2 rounded-sm relative"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenPins()
@@ -346,7 +355,7 @@ export function ChatHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm"
+              className="h-9 max-md:h-11 px-2 rounded-sm"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenSearch()
@@ -359,7 +368,7 @@ export function ChatHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm"
+              className="h-9 max-md:h-11 px-2 rounded-sm hidden sm:inline-flex"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenSummary()
@@ -372,7 +381,7 @@ export function ChatHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm"
+              className="h-9 max-md:h-11 px-2 rounded-sm hidden md:inline-flex"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenShortcuts()
@@ -436,12 +445,12 @@ export function ChatHeader({
 
           <div className="ml-auto flex items-center gap-1 shrink-0">
             <DmGroupStart conversation={conversation} />
-            <DmCallButtons conversationId={conversation.id} />
+            <ConversationCallButtons conversationId={conversation.id} />
             {onToggleDmProfile && (
               <Button
                 variant="ghost"
                 size="sm"
-                className={cn('h-8 px-2 rounded-sm', dmProfileOpen && 'text-hyper')}
+                className={cn('h-9 max-md:h-11 px-2 rounded-sm', dmProfileOpen && 'text-hyper')}
                 onClick={() => {
                   sounds.play('lightTick')
                   onToggleDmProfile()
@@ -455,7 +464,7 @@ export function ChatHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm relative"
+              className="h-9 max-md:h-11 px-2 rounded-sm relative"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenPins()
@@ -468,7 +477,7 @@ export function ChatHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm"
+              className="h-9 max-md:h-11 px-2 rounded-sm"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenSearch()
@@ -481,7 +490,7 @@ export function ChatHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm"
+              className="h-9 max-md:h-11 px-2 rounded-sm hidden sm:inline-flex"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenSummary()
@@ -494,7 +503,7 @@ export function ChatHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-2 rounded-sm"
+              className="h-9 max-md:h-11 px-2 rounded-sm hidden md:inline-flex"
               onClick={() => {
                 sounds.play('lightTick')
                 onOpenShortcuts()
@@ -562,19 +571,49 @@ function GroupHeaderIdentity({ conversation }: { conversation: ConversationSumma
   )
 }
 
-/** Conversation call buttons: voice + video. Works for DMs and group chats. */
-function DmCallButtons({ conversationId }: { conversationId: string }) {
+/** Header call buttons: voice call + video call into any conversation
+ *  (DM or group), plus a separate join button that hops into (or quietly
+ *  starts) the conversation's call without ringing a soul. Hidden entirely
+ *  on your own self-chat: texting yourself is fine, calling yourself is
+ *  not a thing. Starting elsewhere switches calls cleanly (the old one is
+ *  left behind for its participants). */
+function ConversationCallButtons({ conversationId }: { conversationId: string }) {
   const startCall = useChatStore((s) => s.startCall)
+  const joinCall = useChatStore((s) => s.joinCall)
   const activeCall = useChatStore((s) => s.activeCall)
   const incomingCall = useChatStore((s) => s.incomingCall)
-  const busy = !!activeCall || !!incomingCall
+  const conversations = useChatStore((s) => s.conversations)
+  const me = useChatStore((s) => s.me)
+  const live = useChatStore((s) => s.liveCalls[conversationId])
+  const conversation = conversations.find((c) => c.id === conversationId)
+  const selfChat = !!conversation?.otherUser && conversation.otherUser.id === me?.id
+  const inThisCall = (activeCall?.conversationId === conversationId) || (incomingCall?.conversationId === conversationId)
+  if (selfChat) return null
   return (
     <>
+      {/* the invitational path: hop into the live call, or start one that
+       *  simply exists for members to see - no ring, no "calling you" */}
       <Button
         variant="ghost"
         size="sm"
-        className="h-8 px-2 rounded-sm disabled:opacity-40"
-        disabled={busy}
+        className={cn('h-9 max-md:h-11 px-2 rounded-sm', live ? 'text-emerald-300 hover:text-emerald-200' : 'text-muted-foreground/60 hover:text-muted-foreground')}
+        onClick={() => {
+          sounds.play('callEnter')
+          void joinCall(conversationId)
+        }}
+        aria-label={live ? 'join the ongoing call' : 'start a call without ringing'}
+        title="join call"
+      >
+        <span className="relative grid place-items-center">
+          <Phone className="size-4" />
+          {live && <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />}
+        </span>
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-9 max-md:h-11 px-2 rounded-sm disabled:opacity-40"
+        disabled={inThisCall && !incomingCall}
         onClick={() => {
           sounds.play('lightTick')
           void startCall(conversationId, false)
@@ -582,13 +621,13 @@ function DmCallButtons({ conversationId }: { conversationId: string }) {
         aria-label="start a voice call"
         title="voice call"
       >
-        <Phone className="size-4" />
+        <PhoneCall className="size-4" />
       </Button>
       <Button
         variant="ghost"
         size="sm"
-        className="h-8 px-2 rounded-sm disabled:opacity-40"
-        disabled={busy}
+        className="h-9 max-md:h-11 px-2 rounded-sm disabled:opacity-40"
+        disabled={inThisCall && !incomingCall}
         onClick={() => {
           sounds.play('lightTick')
           void startCall(conversationId, true)
@@ -656,7 +695,7 @@ function DmGroupStart({ conversation }: { conversation: ConversationSummary }) {
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 px-2 rounded-sm"
+          className="h-9 max-md:h-11 px-2 rounded-sm"
           onClick={() => sounds.play('lightTick')}
           aria-label="start a group with this person"
           title="start a group"
@@ -761,7 +800,7 @@ function QuickAddMembers({ conversation }: { conversation: ConversationSummary }
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 px-2 rounded-sm"
+          className="h-9 max-md:h-11 px-2 rounded-sm"
           onClick={() => sounds.play('lightTick')}
           aria-label="add friends"
           title="add friends"

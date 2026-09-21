@@ -9,6 +9,7 @@ import { MiniProfilePopover } from './MiniProfile'
 import { awayForLabel } from './MessageList'
 import { lastOnlineLabel } from '@/lib/client/format'
 import { openContextMenu } from './ContextMenu'
+import { callMenuItems } from './callMenu'
 import { Crown, MessageSquare, Minus, Plus, UserRound } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
@@ -79,6 +80,7 @@ export function GroupMemberList({
         { kind: 'item', label: 'profile', icon: UserRound, onSelect: () => viewProfile(member.username) },
         ...(member.id !== me?.id
           ? [
+              ...callMenuItems(member),
               {
                 kind: 'item' as const,
                 label: 'message',
@@ -140,7 +142,7 @@ export function GroupMemberList({
 
   return (
     <aside
-      className="w-full h-full bg-app-sidebar border-l border-white/10 flex flex-col"
+      className="w-full h-full bg-app-sidebar border-l border-white/10 flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0"
       aria-label="group members"
     >
       <div className="flex-1 overflow-y-auto scroll-thin px-2 py-3">

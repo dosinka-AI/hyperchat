@@ -67,7 +67,7 @@ export function ProfilePostsTab({
               'relative aspect-square overflow-hidden rounded-sm border border-white/10 group',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-hyper/70'
             )}
-            aria-label={`open post, ${p.likeCount} likes, ${p.commentCount} comments`}
+            aria-label={`open post, ${p.likeCount} ${p.likeCount === 1 ? 'like' : 'likes'}, ${p.commentCount} ${p.commentCount === 1 ? 'comment' : 'comments'}`}
           >
             <img
               src={p.imageUrl}
