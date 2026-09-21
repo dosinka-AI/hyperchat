@@ -120,10 +120,13 @@ export function initSocket(presence?: UserPresenceChoice): AnySocket {
   // Local/LAN: talk to the sidecar on :3003 with credentials so the
   // httpOnly session cookie is included. CORS on the sidecar reflects the
   // request origin (credentials cannot work with origin '*').
-  // Hosted/Trae: same-origin + XTransformPort so the outer proxy can reach it.
+  // Tunnel / hosted: same-origin `/` so Next can rewrite /socket.io → :3003
+  // (one public URL). Trae can still set NEXT_PUBLIC_SOCKET_URL or use
+  // NEXT_PUBLIC_USE_XTRANSFORM=1.
   const realtimeUrl = (() => {
     if (process.env.NEXT_PUBLIC_SOCKET_URL) return process.env.NEXT_PUBLIC_SOCKET_URL
     if (typeof window === 'undefined') return '/'
+    if (process.env.NEXT_PUBLIC_USE_XTRANSFORM === '1') return '/?XTransformPort=3003'
     const host = window.location.hostname
     const isLocal =
       host === 'localhost' ||
@@ -131,7 +134,7 @@ export function initSocket(presence?: UserPresenceChoice): AnySocket {
       host === '[::1]' ||
       /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)
     if (isLocal) return `${window.location.protocol}//${host}:3003`
-    return '/?XTransformPort=3003'
+    return '/'
   })()
 
   socket = io(realtimeUrl, {

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import {
   Hash,
@@ -240,6 +241,18 @@ export default function LandingView() {
             >
               HyperChat
             </button>
+            <Link
+              href="/games"
+              className="px-3 py-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              Hyperion games
+            </Link>
+            <Link
+              href="/games?tab=browse"
+              className="px-3 py-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              browse
+            </Link>
             <button
               onClick={() => setView('privacy')}
               className="px-3 py-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -326,6 +339,12 @@ export default function LandingView() {
             <button className="hover:text-foreground transition-colors" onClick={() => setView('landing')}>
               HyperChat
             </button>
+            <Link href="/games" className="hover:text-foreground transition-colors">
+              Hyperion games
+            </Link>
+            <Link href="/games?tab=browse" className="hover:text-foreground transition-colors">
+              browse
+            </Link>
             <button
               className="hover:text-foreground transition-colors"
               onClick={() => setView('privacy')}
