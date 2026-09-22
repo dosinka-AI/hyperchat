@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from 'jose'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { hash, compare } from 'bcryptjs'
 import { db } from '@/lib/db'
 
@@ -46,6 +46,26 @@ export async function verifySessionToken(token: string): Promise<string | null> 
   }
 }
 
+async function cookieSecure(): Promise<boolean> {
+  // HTTPS tunnels (trycloudflare) and production hosts need Secure so the
+  // browser keeps the session on the public URL. Local http://localhost stays
+  // insecure so login still works in plain-HTTP preview.
+  if (process.env.COOKIE_SECURE === '1') return true
+  if (process.env.COOKIE_SECURE === '0') return false
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || ''
+  if (appUrl.startsWith('https://')) return true
+  try {
+    const h = await headers()
+    const proto = h.get('x-forwarded-proto') || h.get('x-forwarded-protocol')
+    if (proto?.split(',')[0]?.trim() === 'https') return true
+    const host = h.get('host') || ''
+    if (host.endsWith('.trycloudflare.com') || host.endsWith('.cloudflare.com')) return true
+  } catch {
+    /* headers() unavailable outside a request */
+  }
+  return false
+}
+
 export async function setSessionCookie(user: { id: string; username: string }): Promise<void> {
   const token = await createSessionToken(user)
   const store = await cookies()
@@ -54,12 +74,19 @@ export async function setSessionCookie(user: { id: string; username: string }): 
     sameSite: 'lax',
     path: '/',
     maxAge: THIRTY_DAYS,
+    secure: await cookieSecure(),
   })
 }
 
 export async function clearSessionCookie(): Promise<void> {
   const store = await cookies()
-  store.set(COOKIE_NAME, '', { httpOnly: true, sameSite: 'lax', path: '/', maxAge: 0 })
+  store.set(COOKIE_NAME, '', {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 0,
+    secure: await cookieSecure(),
+  })
 }
 
 export async function getSessionUser(): Promise<SessionUser | null> {

@@ -266,9 +266,18 @@ interface SocketUser {
 }
 
 const io = new Server({
-  // path must stay '/', Caddy forwards on this path
+  // path '/' matches Caddy/nginx handle_path which STRIPS /socket.io before
+  // proxying here. Next's rewrite (below) does the same strip so cloudflared
+  // → :3000 → rewrite → :3003/?EIO=… lands on this Engine path.
   path: '/',
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  // Reflect request origin so withCredentials works for local :3003 clients.
+  // Same-origin via the Next rewrite never needs CORS; this covers direct
+  // LAN/dev connections without breaking cookie auth.
+  cors: {
+    origin: (origin, cb) => cb(null, origin || true),
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
   pingTimeout: 60000,
   pingInterval: 25000,
 })

@@ -209,36 +209,60 @@ export function initSocket(presence?: UserPresenceChoice): AnySocket {
     return socket
   }
 
-  // Realtime endpoint. Default: this sandbox's preview gateway, where the
-  // sidecar rides path '/' behind the XTransformPort query. A deployed host
-  // bakes NEXT_PUBLIC_SOCKET_URL and/or NEXT_PUBLIC_SOCKET_PATH in at build
-  // time to reach the sidecar through its own reverse proxy instead (same
-  // origin, /socket.io path) - see DEPLOY.md for the full-alpha topology.
+  // Realtime endpoint.
+  // - Default / tunnel / hosted: SAME ORIGIN so one public URL (cloudflared →
+  //   :3000) works. Next rewrites /socket.io → sidecar :3003 and forwards the
+  //   session cookie. XTransformPort is Trae/sandbox-only and returns HTML on
+  //   Cloudflare tunnels, which leaves the socket unauthorized and the whole
+  //   ChatApp stuck on the reconnect screen.
+  // - Optional NEXT_PUBLIC_SOCKET_URL / PATH for split deploys (see DEPLOY.md).
+  // - NEXT_PUBLIC_USE_XTRANSFORM=1 keeps the old Trae gateway path.
   const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || undefined
   const socketPath = process.env.NEXT_PUBLIC_SOCKET_PATH || undefined
+  const useXTransform = process.env.NEXT_PUBLIC_USE_XTRANSFORM === '1'
+
+  const realtimeUrl = (() => {
+    if (socketUrl) return socketUrl
+    if (useXTransform) return '/?XTransformPort=3003'
+    return '/'
+  })()
 
   const socketOptions = {
+    path: socketPath ?? '/socket.io',
     // polling first, then upgrade to websocket: polling works anywhere plain
     // HTTP works, so hostile proxies can never fully kill realtime; the
     // upgrade happens automatically once a websocket handshake succeeds
-    transports: ['polling', 'websocket'],
+    transports: ['polling', 'websocket'] as ('polling' | 'websocket')[],
+    withCredentials: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 750,
     reconnectionDelayMax: 5000,
     randomizationFactor: 0.4,
     timeout: 12000,
-    // the persisted presence rides along in the handshake so invisible / dnd
-    // users connect with the right status from the very first moment
-    auth: {
-      presence: presence ?? 'online',
+    // Token in auth (from /api/socket-token) so handshake still works when a
+    // proxy strips cookies on the rewrite to :3003. Falls back to cookie.
+    // Reads manualPresence so reconnects pick up status picker changes.
+    auth: (cb: (data: Record<string, unknown>) => void) => {
+      const base = { presence: manualPresence || presence || 'online' }
+      if (typeof window === 'undefined') {
+        cb(base)
+        return
+      }
+      void fetch('/api/socket-token', { credentials: 'include', cache: 'no-store' })
+        .then(async (res) => {
+          if (!res.ok) {
+            cb(base)
+            return
+          }
+          const data = (await res.json()) as { token?: string }
+          cb(typeof data.token === 'string' ? { ...base, token: data.token } : base)
+        })
+        .catch(() => cb(base))
     },
   }
 
-  socket =
-    socketUrl || socketPath
-      ? io(socketUrl, { ...socketOptions, path: socketPath ?? '/socket.io' })
-      : io('/?XTransformPort=3003', socketOptions)
+  socket = io(realtimeUrl, socketOptions)
   G[SOCKET_KEY] = socket
   G[GEN_KEY] = MODULE_GEN
   wireHandlers(socket)
@@ -772,10 +796,7 @@ export function setPresence(presence: UserPresenceChoice): void {
   ensureWired()
   manualPresence = presence
   autoIdled = false
-  // reconnects re-send the handshake auth: keep it in sync
-  if (socket && 'auth' in socket) {
-    ;(socket as unknown as { auth: Record<string, unknown> }).auth.presence = presence
-  }
+  // reconnects re-run the auth callback which reads manualPresence
   socket?.emit('status:update', { status: presence })
 }
 

@@ -51,9 +51,9 @@ const CATEGORIES: { id: string; label: string; emojis: EmojiDef[] }[] = [
       { char: '😘', names: 'kiss' },
       { char: '😗', names: 'kissing' },
       { char: '😚', names: 'kiss closed eyes' },
-      { char: '😋', names: 'yum tasty' },
-      { char: '😛', names: 'tongue' },
-      { char: '😜', names: 'wink tongue crazy' },
+      { char: '😋', names: 'yum tasty tongue delicious savoring' },
+      { char: '😛', names: 'stuck_out_tongue playful tease' },
+      { char: '😜', names: 'wink_tongue crazy silly' },
       { char: '🤪', names: 'zany crazy silly' },
       { char: '🤨', names: 'raised eyebrow suspicious' },
       { char: '🧐', names: 'monocle inspect' },
@@ -808,18 +808,26 @@ export function notifyEmojiMenuToggled() {
   window.dispatchEvent(new CustomEvent('hyperchat-emoji-menu'))
 }
 
-/** Flat shortcode index for :name: autocomplete. First keyword of each
- *  emoji is its canonical short name. */
+/** Flat shortcode index for :name: autocomplete. Every keyword on an emoji
+ *  is a valid shortcode (so :yum: / :tasty: / :tongue: can all resolve to 😋),
+ *  plus an underscore-joined form for multi-word names (:heart_eyes:). */
 const SHORTCODE_INDEX: { char: string; code: string; names: string }[] = CATEGORIES.flatMap((cat) =>
-  cat.emojis.map((e) => ({
-    char: e.char,
-    code: e.names.split(' ')[0],
-    names: e.names,
-  }))
+  cat.emojis.flatMap((e) => {
+    const words = e.names
+      .toLowerCase()
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter(Boolean)
+    const codes = new Set<string>()
+    for (const w of words) codes.add(w)
+    if (words.length > 1) codes.add(words.join('_'))
+    const names = words.join(' ')
+    return [...codes].map((code) => ({ char: e.char, code, names }))
+  })
 )
 
-/** Lookup shortcode matches for the :query being typed. Prefix matches on
- *  the canonical code rank first, then substring, then keywords. */
+/** Lookup shortcode matches for the :query being typed. Alias prefix hits
+ *  rank first, then alias substring, then broader keyword matches. */
 export function searchShortcodes(query: string, limit = 8): { char: string; code: string }[] {
   const q = query.trim().toLowerCase()
   if (!q) return []
@@ -828,31 +836,34 @@ export function searchShortcodes(query: string, limit = 8): { char: string; code
   const push = (e: { char: string; code: string }) => {
     if (!seen.has(e.char)) {
       seen.add(e.char)
+      // Prefer showing the alias the user is typing when it matches,
+      // otherwise the first/canonical code for that glyph.
       out.push({ char: e.char, code: e.code })
     }
   }
-  // tier 1: the code starts with the query (":fi" -> fire, fingers)
+  // tier 1: an alias starts with the query (":tas" -> tasty → 😋)
   for (const e of SHORTCODE_INDEX) {
     if (out.length >= limit) break
-    if (e.code.startsWith(q)) push(e)
+    if (e.code.startsWith(q)) push({ char: e.char, code: e.code })
   }
-  // tier 2: the code contains the query
+  // tier 2: an alias contains the query
   for (const e of SHORTCODE_INDEX) {
     if (out.length >= limit) break
-    if (e.code.includes(q)) push(e)
+    if (e.code.includes(q)) push({ char: e.char, code: e.code })
   }
-  // tier 3: keyword matches
+  // tier 3: keyword bag match (covers leftover multi-word text)
   for (const e of SHORTCODE_INDEX) {
     if (out.length >= limit) break
-    if (e.names.includes(q)) push(e)
+    if (e.names.includes(q)) push({ char: e.char, code: e.code })
   }
   return out.slice(0, limit)
 }
 
-/** Exact :code: lookup: the moment a token closes with its second colon,
- *  this resolves straight to the emoji so the composer can swap it in. */
+/** Exact :code: lookup: any alias on an emoji resolves to that glyph. */
 export function exactShortcode(code: string): { char: string; code: string } | null {
-  const hit = SHORTCODE_INDEX.find((e) => e.code === code)
+  const q = code.trim().toLowerCase()
+  if (!q) return null
+  const hit = SHORTCODE_INDEX.find((e) => e.code === q)
   return hit ?? null
 }
 
@@ -864,7 +875,7 @@ export function expandShortcodes(text: string): string {
   if (!text.includes(':')) return text
   return text.replace(/:([a-z0-9_+\-]+):/gi, (whole, code: string) => {
     if (isServerEmojiName(code.toLowerCase())) return whole
-    const hit = SHORTCODE_INDEX.find((e) => e.code === code.toLowerCase())
+    const hit = exactShortcode(code)
     if (hit) {
       queueMicrotask(() => {
         rememberUsage(hit.char)
